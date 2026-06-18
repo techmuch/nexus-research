@@ -13,6 +13,7 @@ import (
 var (
 	usernameFlag string
 	passwordFlag string
+	adminFlag    bool
 )
 
 var userCmd = &cobra.Command{
@@ -33,6 +34,7 @@ var userCreateCmd = &cobra.Command{
 
 		username := usernameFlag
 		password := passwordFlag
+		admin := adminFlag
 
 		reader := bufio.NewReader(os.Stdin)
 
@@ -54,11 +56,22 @@ var userCreateCmd = &cobra.Command{
 			password = strings.TrimSpace(input)
 		}
 
+		if usernameFlag == "" || passwordFlag == "" {
+			cmd.Print("Give admin permissions? (y/n): ")
+			input, err := reader.ReadString('\n')
+			if err == nil {
+				ans := strings.ToLower(strings.TrimSpace(input))
+				if ans == "y" || ans == "yes" {
+					admin = true
+				}
+			}
+		}
+
 		if username == "" || password == "" {
 			return fmt.Errorf("username and password cannot be empty")
 		}
 
-		err = db.CreateUser(username, password)
+		err = db.CreateUser(username, password, admin)
 		if err != nil {
 			return err
 		}
@@ -71,6 +84,7 @@ var userCreateCmd = &cobra.Command{
 func init() {
 	userCreateCmd.Flags().StringVarP(&usernameFlag, "username", "u", "", "Username for the new user")
 	userCreateCmd.Flags().StringVarP(&passwordFlag, "password", "p", "", "Password for the new user")
+	userCreateCmd.Flags().BoolVarP(&adminFlag, "admin", "a", false, "Create user with admin permissions")
 	
 	userCmd.AddCommand(userCreateCmd)
 	rootCmd.AddCommand(userCmd)

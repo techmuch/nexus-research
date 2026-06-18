@@ -14,7 +14,7 @@ import (
 
 func TestMain(m *testing.M) {
 	_ = db.InitDB(":memory:")
-	_ = db.CreateUser("admin", "adminpassword")
+	_ = db.CreateUser("admin", "adminpassword", true)
 	code := m.Run()
 	_ = db.CloseDB()
 	os.Exit(code)

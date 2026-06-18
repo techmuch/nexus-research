@@ -20,24 +20,24 @@ func TestDatabaseFlow(t *testing.T) {
 	}
 
 	// 2. Test CreateUser
-	err = CreateUser("admin", "adminpassword")
+	err = CreateUser("admin", "adminpassword", true)
 	if err != nil {
 		t.Errorf("failed to create user: %v", err)
 	}
 
 	// Test user duplicate creation returns error
-	err = CreateUser("admin", "anotherpassword")
+	err = CreateUser("admin", "anotherpassword", false)
 	if !errors.Is(err, ErrUserAlreadyExists) {
 		t.Errorf("expected ErrUserAlreadyExists, got %v", err)
 	}
 
 	// Test empty credentials return error
-	err = CreateUser("", "password")
+	err = CreateUser("", "password", false)
 	if err == nil {
 		t.Errorf("expected error when username is empty, got nil")
 	}
 
-	err = CreateUser("user", "")
+	err = CreateUser("user", "", false)
 	if err == nil {
 		t.Errorf("expected error when password is empty, got nil")
 	}
@@ -122,7 +122,7 @@ func TestListAndDeleteUsers(t *testing.T) {
 	}
 
 	// Create user
-	_ = CreateUser("testuser", "testpassword")
+	_ = CreateUser("testuser", "testpassword", true)
 
 	// List should return 1 user
 	users, err = ListUsers()
@@ -134,6 +134,9 @@ func TestListAndDeleteUsers(t *testing.T) {
 	}
 	if users[0].Username != "testuser" {
 		t.Errorf("expected username 'testuser', got '%s'", users[0].Username)
+	}
+	if !users[0].IsAdmin {
+		t.Errorf("expected users[0].IsAdmin to be true")
 	}
 
 	// Delete user
@@ -168,7 +171,7 @@ func TestDBClosedErrors(t *testing.T) {
 	_ = InitDB(":memory:")
 	_ = CloseDB()
 
-	err := CreateUser("user", "pass")
+	err := CreateUser("user", "pass", false)
 	if err == nil {
 		t.Errorf("expected error when DB is closed")
 	}

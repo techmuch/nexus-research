@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/techmuch/nexus-research/db"
 )
 
@@ -166,6 +167,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								}
 								return nil
 							}),
+						huh.NewConfirm().
+							Title("Give admin permissions?").
+							Key("isAdmin"),
 					),
 				)
 				return m, m.form.Init()
@@ -178,6 +182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				var options []huh.Option[string]
+				options = append(options, huh.NewOption("(Cancel)", "CANCEL"))
 				for _, u := range users {
 					options = append(options, huh.NewOption(u.Username, u.Username))
 				}
@@ -238,9 +243,28 @@ func (m Model) View() string {
 		} else if len(users) == 0 {
 			s.WriteString("No users found. Admin must create a user.\n")
 		} else {
+			t := table.New().
+				Border(lipgloss.RoundedBorder()).
+				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#30363D"))).
+				Headers("USERNAME", "ROLE", "CREATED AT")
+
 			for _, u := range users {
-				s.WriteString(normalStyle.Render(fmt.Sprintf("- %-20s (Created: %s)\n", u.Username, u.CreatedAt.Format("2006-01-02 15:04"))))
+				role := "User"
+				if u.IsAdmin {
+					role = "Admin"
+				}
+				t.Row(u.Username, role, u.CreatedAt.Format("2006-01-02 15:04"))
 			}
+
+			t.StyleFunc(func(row, col int) lipgloss.Style {
+				if row == 0 {
+					return lipgloss.NewStyle().Foreground(lipgloss.Color("#00b52d")).Bold(true)
+				}
+				return lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
+			})
+
+			s.WriteString(t.Render())
+			s.WriteString("\n")
 		}
 		s.WriteString("\n")
 		if m.statusMsg != "" {
@@ -282,7 +306,8 @@ func (m *Model) handleFormCompletion() {
 	case stateUserCreate:
 		username := m.form.GetString("username")
 		password := m.form.GetString("password")
-		err := db.CreateUser(username, password)
+		isAdmin := m.form.GetBool("isAdmin")
+		err := db.CreateUser(username, password, isAdmin)
 		if err != nil {
 			m.statusMsg = fmt.Sprintf("Error: %v", err)
 		} else {
@@ -291,6 +316,11 @@ func (m *Model) handleFormCompletion() {
 		m.state = stateUserList
 	case stateUserDelete:
 		targetUser := m.form.GetString("targetUser")
+		if targetUser == "CANCEL" || targetUser == "" {
+			m.statusMsg = "User deletion cancelled"
+			m.state = stateUserList
+			return
+		}
 		err := db.DeleteUser(targetUser)
 		if err != nil {
 			m.statusMsg = fmt.Sprintf("Error deleting user: %v", err)

@@ -19,6 +19,7 @@ type User struct {
 	ID           int
 	Username     string
 	PasswordHash string
+	IsAdmin      bool
 	CreatedAt    time.Time
 }
 
@@ -33,12 +34,16 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
+	// Migration: Add is_admin column if it doesn't exist. Ignore error if column already exists.
+	_, _ = DB.Exec("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
+
 	// Create tables
 	query := `
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL,
+		is_admin BOOLEAN DEFAULT 0,
 		created_at DATETIME NOT NULL
 	);`
 	
@@ -55,7 +60,7 @@ func CloseDB() error {
 	return nil
 }
 
-func CreateUser(username, password string) error {
+func CreateUser(username, password string, isAdmin bool) error {
 	if DB == nil {
 		return errors.New("database not initialized")
 	}
@@ -80,9 +85,10 @@ func CreateUser(username, password string) error {
 	}
 
 	_, err = DB.Exec(
-		"INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+		"INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
 		username,
 		string(hashedBytes),
+		isAdmin,
 		time.Now(),
 	)
 	return err
@@ -120,7 +126,7 @@ func ListUsers() ([]User, error) {
 	if DB == nil {
 		return nil, errors.New("database not initialized")
 	}
-	rows, err := DB.Query("SELECT id, username, password_hash, created_at FROM users ORDER BY username ASC")
+	rows, err := DB.Query("SELECT id, username, password_hash, is_admin, created_at FROM users ORDER BY username ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +135,7 @@ func ListUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt)
+		err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.IsAdmin, &u.CreatedAt)
 		if err != nil {
 			return nil, err
 		}

@@ -13,7 +13,7 @@ import (
 
 func TestMain(m *testing.M) {
 	_ = db.InitDB(":memory:")
-	_ = db.CreateUser("admin", "adminpassword")
+	_ = db.CreateUser("admin", "adminpassword", true)
 	code := m.Run()
 	_ = db.CloseDB()
 	os.Exit(code)
@@ -192,11 +192,13 @@ func TestTUIFormHandlers(t *testing.T) {
 		huh.NewGroup(
 			huh.NewInput().Key("username"),
 			huh.NewInput().Key("password"),
+			huh.NewConfirm().Key("isAdmin"),
 		),
 	)
 	setFormResults(m.form, map[string]any{
 		"username": "testformuser",
 		"password": "testformpass",
+		"isAdmin":  true,
 	})
 	m.form.State = huh.StateCompleted
 	m.handleFormCompletion()
@@ -297,6 +299,26 @@ func TestTUIFormHandlers(t *testing.T) {
 	if m.state != stateMenu {
 		t.Errorf("expected stateMenu after config abort, got %v", m.state)
 	}
+
+	// 5. Test handleFormCompletion for stateUserDelete cancel
+	m.state = stateUserDelete
+	m.form = huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().Key("targetUser"),
+		),
+	)
+	setFormResults(m.form, map[string]any{
+		"targetUser": "CANCEL",
+	})
+	m.form.State = huh.StateCompleted
+	m.handleFormCompletion()
+
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList on delete cancel, got %v", m.state)
+	}
+	if !strings.Contains(m.statusMsg, "User deletion cancelled") {
+		t.Errorf("expected statusMsg to show cancellation, got: %s", m.statusMsg)
+	}
 }
 
 func TestUpdateFormForwarding(t *testing.T) {
@@ -318,12 +340,14 @@ func TestUpdateFormForwarding(t *testing.T) {
 		huh.NewGroup(
 			huh.NewInput().Key("username"),
 			huh.NewInput().Key("password"),
+			huh.NewConfirm().Key("isAdmin"),
 		),
 	)
 	
 	setFormResults(m.form, map[string]any{
 		"username": "userfromupdate",
 		"password": "pwdfromupdate",
+		"isAdmin":  true,
 	})
 	
 	m.form.State = huh.StateCompleted
@@ -417,7 +441,7 @@ func TestDeleteNoUsers(t *testing.T) {
 	// Reinitialize DB for other tests
 	_ = db.CloseDB()
 	_ = db.InitDB(":memory:")
-	_ = db.CreateUser("admin", "adminpassword")
+	_ = db.CreateUser("admin", "adminpassword", true)
 }
 
 func TestUserListViewError(t *testing.T) {
@@ -429,7 +453,7 @@ func TestUserListViewError(t *testing.T) {
 		t.Errorf("expected view to contain 'Error listing users', got:\n%s", viewStr)
 	}
 	_ = db.InitDB(":memory:") // restore
-	_ = db.CreateUser("admin", "adminpassword")
+	_ = db.CreateUser("admin", "adminpassword", true)
 }
 
 func TestStatusViewNonExistentDB(t *testing.T) {

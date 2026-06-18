@@ -112,7 +112,7 @@ func TestUserCreateInteractive(t *testing.T) {
 
 	go func() {
 		defer w.Close()
-		w.Write([]byte("admininteractive\nadminpassword\n"))
+		w.Write([]byte("admininteractive\nadminpassword\ny\n"))
 	}()
 
 	buf := new(bytes.Buffer)
@@ -127,6 +127,23 @@ func TestUserCreateInteractive(t *testing.T) {
 
 	output := buf.String()
 	if !strings.Contains(output, "User 'admininteractive' successfully created.") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestUserCreateFlagsWithAdmin(t *testing.T) {
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"user", "create", "-u", "adminwithflag", "-p", "passwordflags", "--admin", "--db", ":memory:"})
+
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "User 'adminwithflag' successfully created.") {
 		t.Errorf("expected success message, got: %s", output)
 	}
 }
