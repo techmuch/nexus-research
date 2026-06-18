@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"embed"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +73,85 @@ func TestServeCommandRun(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Errorf("expected error when running serve command on port -1, got nil")
+	}
+}
+
+func TestUserCreateFlags(t *testing.T) {
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"user", "create", "-u", "adminflags", "-p", "passwordflags", "--db", ":memory:"})
+
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "User 'adminflags' successfully created.") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestUserCreateInteractive(t *testing.T) {
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	defer func() {
+		os.Stdin = oldStdin
+	}()
+	os.Stdin = r
+
+	go func() {
+		defer w.Close()
+		w.Write([]byte("admininteractive\nadminpassword\n"))
+	}()
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"user", "create", "-u", "", "-p", "", "--db", ":memory:"})
+
+	err = rootCmd.Execute()
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "User 'admininteractive' successfully created.") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestUserCreateError(t *testing.T) {
+	rootCmd.SetArgs([]string{"user", "create", "-u", "test", "-p", "test", "--db", "/nonexistentdir/nexus.db"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Errorf("expected error when running user create with invalid DB path, got nil")
+	}
+}
+
+func TestUserCreateEmptyInteractiveError(t *testing.T) {
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	defer func() {
+		os.Stdin = oldStdin
+	}()
+	os.Stdin = r
+
+	go func() {
+		defer w.Close()
+		w.Write([]byte("\n\n")) // empty username and password
+	}()
+
+	rootCmd.SetArgs([]string{"user", "create", "-u", "", "-p", "", "--db", ":memory:"})
+	err = rootCmd.Execute()
+	if err == nil {
+		t.Errorf("expected error when username and password are empty, got nil")
 	}
 }

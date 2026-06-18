@@ -15,6 +15,11 @@ interface StatusResponse {
   db_connected: boolean;
 }
 
+interface AuthCheckResponse {
+  authenticated: boolean;
+  username?: string;
+}
+
 function DashboardTab() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -22,7 +27,12 @@ function DashboardTab() {
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/status');
+      const base = import.meta.env.BASE_URL;
+      const res = await fetch(`${base}api/status`);
+      if (res.status === 401) {
+        window.location.reload(); // Force reload to trigger login redirect
+        return;
+      }
       const data = await res.json();
       setStatus(data);
     } catch (err) {
@@ -91,7 +101,7 @@ function DashboardTab() {
               <p className="font-semibold text-foreground text-sm">Visual Argumentation Mapper</p>
               <p className="text-xs text-muted-foreground">Compendium-style dialogue map rendering</p>
             </div>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400">Idle</span>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-600 dark:text-emerald-400">Idle</span>
           </li>
         </ul>
       </div>
@@ -223,62 +233,211 @@ function DocsTab() {
   );
 }
 
+function LoginScreen({ onLoginSuccess }: { onLoginSuccess: (username: string) => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username || !password) {
+      setError('Username and password are required');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const base = import.meta.env.BASE_URL;
+      const res = await fetch(`${base}api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || 'Authentication failed');
+        return;
+      }
+
+      const data = await res.json();
+      onLoginSuccess(data.username);
+    } catch (err) {
+      setError('Server connection error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="h-screen w-screen flex items-center justify-center bg-[#0D1117] text-white font-sans overflow-hidden relative">
+      {/* Decorative backdrop elements */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-500/10 blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none" />
+
+      {/* Login Card */}
+      <div className="w-[420px] p-8 bg-[#161B22]/90 border border-gray-800 rounded-xl shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] backdrop-blur-md relative z-10 flex flex-col gap-6 transition-all duration-300 hover:border-emerald-500/30">
+        <div className="text-center">
+          <h1 className="text-2xl font-extrabold tracking-wider text-emerald-500">NEXUS RESEARCH STATION</h1>
+          <p className="text-xs text-gray-400 mt-2">Enter credentials to establish control terminal connection</p>
+        </div>
+
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded p-3 text-sm text-red-400 font-medium">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold tracking-wide text-gray-300 uppercase">Username</label>
+            <input 
+              type="text" 
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="e.g. admin"
+              disabled={loading}
+              className="px-4 py-3 bg-[#0D1117] border border-gray-800 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-gray-600"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold tracking-wide text-gray-300 uppercase">Password</label>
+            <input 
+              type="password" 
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              disabled={loading}
+              className="px-4 py-3 bg-[#0D1117] border border-gray-800 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-gray-600"
+            />
+          </div>
+
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full mt-2 py-3 bg-emerald-500 text-[#0D1117] font-bold tracking-wider rounded hover:bg-emerald-400 disabled:bg-emerald-600/50 disabled:text-gray-500 transition-all active:scale-[0.98]"
+          >
+            {loading ? 'CONNECTING...' : 'ESTABLISH LINK'}
+          </button>
+        </form>
+
+        <div className="border-t border-gray-800/60 pt-4 text-center">
+          <p className="text-[10px] text-gray-500 leading-normal">
+            Admins must register user accounts locally using the CLI utility:
+            <code className="block mt-2 p-1.5 bg-[#0D1117] border border-gray-800/80 rounded font-mono text-gray-400 text-[9px] select-all">
+              nexus-research user create
+            </code>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<string>('');
+
   useEffect(() => {
-    // 1. Initialize core registries
-    initializeShell();
-
-    // 2. Register Custom Tab Components
-    componentRegistry.register('nexus-dashboard', DashboardTab);
-    componentRegistry.register('nexus-docs', DocsTab);
-
-    // 3. Register Custom commands
-    commandRegistry.registerCommand({
-      id: 'app.ping_api',
-      label: 'Ping Backend API',
-      execute: async () => {
-        try {
-          const res = await fetch('/api/status');
-          const data = await res.json();
-          alert(`API Response:\n\nStatus: ${data.status}\nUptime: ${data.uptime}\nVersion: ${data.version}\nDatabase connected: ${data.db_connected}`);
-        } catch (err) {
-          alert(`API Error: Failed to connect to server.`);
+    const checkAuth = async () => {
+      try {
+        const base = import.meta.env.BASE_URL;
+        const res = await fetch(`${base}api/auth/check`);
+        const data: AuthCheckResponse = await res.json();
+        if (data.authenticated) {
+          setIsAuthenticated(true);
+          setUser(data.username || 'user');
         }
-      },
-    });
-
-    commandRegistry.registerCommand({
-      id: 'app.open_docs',
-      label: 'Open Documentation',
-      execute: () => {
-        const layoutState = useLayoutStore.getState();
-        layoutState.addTab('nexus-docs', 'Documentation');
-      },
-    });
-
-    // 4. Add to the File and Help menus
-    menuRegistry.registerMenu('File', {
-      id: 'file.ping_api',
-      label: 'Ping API Status',
-      commandId: 'app.ping_api',
-    });
-
-    menuRegistry.registerMenu('Help', {
-      id: 'help.open_docs',
-      label: 'Open Documentation',
-      commandId: 'app.open_docs',
-    });
-
-    // 5. Automatically open the dashboard & docs tab on startup
-    const layoutState = useLayoutStore.getState();
-    layoutState.addTab('nexus-dashboard', 'Dashboard');
-    layoutState.addTab('nexus-docs', 'Documentation');
-
+      } catch (err) {
+        console.error('Failed to verify session:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkAuth();
   }, []);
+
+  const handleLoginSuccess = (username: string) => {
+    setIsAuthenticated(true);
+    setUser(username);
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Initialize core registries
+      initializeShell();
+
+      // Register Custom Tab Components
+      componentRegistry.register('nexus-dashboard', DashboardTab);
+      componentRegistry.register('nexus-docs', DocsTab);
+
+      // Register Custom commands
+      commandRegistry.registerCommand({
+        id: 'app.ping_api',
+        label: 'Ping Backend API',
+        execute: async () => {
+          try {
+            const base = import.meta.env.BASE_URL;
+            const res = await fetch(`${base}api/status`);
+            const data = await res.json();
+            alert(`API Response:\n\nStatus: ${data.status}\nUptime: ${data.uptime}\nVersion: ${data.version}\nDatabase connected: ${data.db_connected}`);
+          } catch (err) {
+            alert(`API Error: Failed to connect to server.`);
+          }
+        },
+      });
+
+      commandRegistry.registerCommand({
+        id: 'app.open_docs',
+        label: 'Open Documentation',
+        execute: () => {
+          const layoutState = useLayoutStore.getState();
+          layoutState.addTab('nexus-docs', 'Documentation');
+        },
+      });
+
+      // Add to the File and Help menus
+      menuRegistry.registerMenu('File', {
+        id: 'file.ping_api',
+        label: 'Ping API Status',
+        commandId: 'app.ping_api',
+      });
+
+      menuRegistry.registerMenu('Help', {
+        id: 'help.open_docs',
+        label: 'Open Documentation',
+        commandId: 'app.open_docs',
+      });
+
+      // Automatically open the dashboard & docs tab on startup
+      const layoutState = useLayoutStore.getState();
+      layoutState.addTab('nexus-dashboard', 'Dashboard');
+      layoutState.addTab('nexus-docs', 'Documentation');
+    }
+  }, [isAuthenticated]);
+
+  if (loading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#0D1117] text-emerald-500 font-mono text-sm">
+        INITIALIZING CORE SYSTEM...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
-      <ShellLayout title={<div className="font-bold text-lg text-primary">NEXUS RESEARCH STATION</div>} />
+      <ShellLayout 
+        title={<div className="font-bold text-lg text-primary">NEXUS RESEARCH STATION - TERMINAL {user.toUpperCase()}</div>} 
+      />
     </div>
   );
 }

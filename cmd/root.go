@@ -10,6 +10,7 @@ import (
 
 var (
 	frontendFS embed.FS
+	DBPath     string
 	rootCmd    = &cobra.Command{
 		Use:   "nexus-research",
 		Short: "NEXUS Research Station CLI",
@@ -29,5 +30,5 @@ func Execute() {
 }
 
 func init() {
-	// Global flags can be added here if needed
+	rootCmd.PersistentFlags().StringVar(&DBPath, "db", "nexus.db", "Path to SQLite database file")
 }

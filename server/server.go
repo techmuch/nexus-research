@@ -7,7 +7,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/techmuch/nexus-research/db"
 )
 
 type Server struct {
@@ -15,6 +19,8 @@ type Server struct {
 	port        string
 	startTime   time.Time
 	frontendDir string
+	sessions    map[string]string
+	sessionsMu  sync.RWMutex
 }
 
 type StatusResponse struct {
@@ -30,6 +36,7 @@ func NewServer(frontendFS embed.FS, port string) *Server {
 		port:        port,
 		startTime:   time.Now(),
 		frontendDir: "frontend/dist",
+		sessions:    make(map[string]string),
 	}
 }
 
@@ -38,6 +45,8 @@ func (s *Server) setupRouter() (*http.ServeMux, error) {
 
 	// 1. API routes
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 
 	// 2. Static and SPA routing
 	// Extract the subdirectory from the embedded FS
@@ -91,7 +100,97 @@ func (s *Server) Start() error {
 	return http.ListenAndServe(":"+s.port, mux)
 }
 
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type AuthCheckResponse struct {
+	Authenticated bool   `json:"authenticated"`
+	Username      string `json:"username,omitempty"`
+}
+
+func (s *Server) isAuthorized(r *http.Request) (string, bool) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		return "", false
+	}
+
+	s.sessionsMu.RLock()
+	username, ok := s.sessions[cookie.Value]
+	s.sessionsMu.RUnlock()
+
+	return username, ok
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req LoginRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	valid, err := db.AuthenticateUser(req.Username, req.Password)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if !valid {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid username or password"})
+		return
+	}
+
+	// Session token generation
+	token := uuid.New().String()
+	s.sessionsMu.Lock()
+	s.sessions[token] = req.Username
+	s.sessionsMu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false, // Set true if running HTTPS
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":   "ok",
+		"username": req.Username,
+	})
+}
+
+func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	username, ok := s.isAuthorized(r)
+	w.Header().Set("Content-Type", "application/json")
+	
+	resp := AuthCheckResponse{
+		Authenticated: ok,
+		Username:      username,
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.isAuthorized(r); !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	
 	uptime := time.Since(s.startTime).Round(time.Second).String()
@@ -100,7 +199,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Status:      "ok",
 		Uptime:      uptime,
 		Version:     "0.1.0",
-		DBConnected: true, // Mocked for stand-alone mode
+		DBConnected: true,
 	}
 
 	json.NewEncoder(w).Encode(resp)

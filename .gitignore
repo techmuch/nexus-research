@@ -1,6 +1,8 @@
 # Go Build Artifacts
 /bin/
 nexus-research
+*.db
+*.db-*
 
 # Frontend Node Modules & Build Artifacts
 /frontend/node_modules/
