@@ -56,6 +56,9 @@ func CloseDB() error {
 }
 
 func CreateUser(username, password string) error {
+	if DB == nil {
+		return errors.New("database not initialized")
+	}
 	if username == "" || password == "" {
 		return errors.New("username and password cannot be empty")
 	}
@@ -86,6 +89,9 @@ func CreateUser(username, password string) error {
 }
 
 func AuthenticateUser(username, password string) (bool, error) {
+	if DB == nil {
+		return false, errors.New("database not initialized")
+	}
 	if username == "" || password == "" {
 		return false, nil
 	}
@@ -108,4 +114,51 @@ func AuthenticateUser(username, password string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func ListUsers() ([]User, error) {
+	if DB == nil {
+		return nil, errors.New("database not initialized")
+	}
+	rows, err := DB.Query("SELECT id, username, password_hash, created_at FROM users ORDER BY username ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+
+	return users, nil
+}
+
+func DeleteUser(username string) error {
+	if DB == nil {
+		return errors.New("database not initialized")
+	}
+	if username == "" {
+		return errors.New("username cannot be empty")
+	}
+
+	result, err := DB.Exec("DELETE FROM users WHERE username = ?", username)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrUserNotFound
+	}
+
+	return nil
 }

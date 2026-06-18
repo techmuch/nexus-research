@@ -29,14 +29,20 @@ func TestCommandStructure(t *testing.T) {
 
 	// Verify that serveCmd is a subcommand of rootCmd
 	found := false
+	foundConfig := false
 	for _, cmd := range rootCmd.Commands() {
 		if cmd.Name() == "serve" {
 			found = true
-			break
+		}
+		if cmd.Name() == "config" {
+			foundConfig = true
 		}
 	}
 	if !found {
 		t.Errorf("expected serve command to be registered under root command")
+	}
+	if !foundConfig {
+		t.Errorf("expected config command to be registered under root command")
 	}
 }
 
@@ -153,5 +159,36 @@ func TestUserCreateEmptyInteractiveError(t *testing.T) {
 	err = rootCmd.Execute()
 	if err == nil {
 		t.Errorf("expected error when username and password are empty, got nil")
+	}
+}
+
+func TestConfigCommand(t *testing.T) {
+	oldRunTUI := runTUI
+	defer func() { runTUI = oldRunTUI }()
+
+	runTUICalled := false
+	runTUI = func(dbPath string) error {
+		runTUICalled = true
+		if dbPath != ":memory:" {
+			t.Errorf("expected dbPath to be ':memory:', got '%s'", dbPath)
+		}
+		return nil
+	}
+
+	rootCmd.SetArgs([]string{"config", "--db", ":memory:"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if !runTUICalled {
+		t.Errorf("expected runTUI to be called")
+	}
+}
+
+func TestConfigCommandError(t *testing.T) {
+	rootCmd.SetArgs([]string{"config", "--db", "/nonexistentdir/nexus.db"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Errorf("expected error when running config with invalid DB path, got nil")
 	}
 }
