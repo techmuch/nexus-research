@@ -18,19 +18,25 @@ type state int
 const (
 	stateMenu state = iota
 	stateUserList
+	stateUserDetail
 	stateUserCreate
 	stateUserDelete
 	stateConfig
 	stateStatus
+	stateUserChangePassword
+	stateUserRename
 )
 
 type Model struct {
-	state       state
-	cursor      int
-	dbPath      string
-	statusMsg   string
-	terminalOut io.Writer
-	form        *huh.Form
+	state              state
+	cursor             int
+	dbPath             string
+	statusMsg          string
+	terminalOut        io.Writer
+	form               *huh.Form
+	selectedUserCursor int
+	detailCursor       int
+	targetUser         db.User
 }
 
 var (
@@ -56,10 +62,12 @@ var (
 
 func NewModel(dbPath string) Model {
 	return Model{
-		state:       stateMenu,
-		cursor:      0,
-		dbPath:      dbPath,
-		terminalOut: os.Stdout,
+		state:              stateMenu,
+		cursor:             0,
+		dbPath:             dbPath,
+		terminalOut:        os.Stdout,
+		selectedUserCursor: 0,
+		detailCursor:       0,
 	}
 }
 
@@ -69,7 +77,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// If a form is currently active, forward the message to the form
-	if m.state == stateUserCreate || m.state == stateUserDelete || m.state == stateConfig {
+	if m.state == stateUserCreate || m.state == stateUserDelete || m.state == stateConfig || m.state == stateUserChangePassword || m.state == stateUserRename {
 		var cmd tea.Cmd
 		var newForm tea.Model
 		newForm, cmd = m.form.Update(msg)
@@ -88,35 +96,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
+			return m, tea.Quit
+		case "q":
 			if m.state == stateMenu {
 				return m, tea.Quit
+			}
+			if m.state == stateUserDetail {
+				m.state = stateUserList
+				m.statusMsg = ""
+				return m, nil
 			}
 			m.state = stateMenu
 			m.statusMsg = ""
 			return m, nil
 		case "up", "k":
-			if m.state == stateMenu {
+			switch m.state {
+			case stateMenu:
 				if m.cursor > 0 {
 					m.cursor--
 				}
+			case stateUserList:
+				if m.selectedUserCursor > 0 {
+					m.selectedUserCursor--
+				}
+			case stateUserDetail:
+				if m.detailCursor > 0 {
+					m.detailCursor--
+				}
 			}
 		case "down", "j":
-			if m.state == stateMenu {
+			switch m.state {
+			case stateMenu:
 				if m.cursor < 3 {
 					m.cursor++
 				}
+			case stateUserList:
+				users, err := db.ListUsers()
+				if err == nil && len(users) > 0 {
+					if m.selectedUserCursor < len(users)-1 {
+						m.selectedUserCursor++
+					}
+				}
+			case stateUserDetail:
+				if m.detailCursor < 4 {
+					m.detailCursor++
+				}
 			}
 		case "esc":
-			m.state = stateMenu
-			m.statusMsg = ""
+			if m.state == stateUserDetail {
+				m.state = stateUserList
+				m.statusMsg = ""
+			} else {
+				m.state = stateMenu
+				m.statusMsg = ""
+			}
 			return m, nil
 		case "enter":
-			if m.state == stateMenu {
+			switch m.state {
+			case stateMenu:
 				switch m.cursor {
 				case 0: // User Management
 					m.state = stateUserList
 					m.statusMsg = ""
+					m.selectedUserCursor = 0
 				case 1: // Edit Database Config
 					m.state = stateConfig
 					m.form = huh.NewForm(
@@ -140,7 +183,76 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case 3: // Exit
 					return m, tea.Quit
 				}
-			} else if m.state == stateStatus {
+			case stateUserList:
+				users, err := db.ListUsers()
+				if err == nil && len(users) > 0 && m.selectedUserCursor >= 0 && m.selectedUserCursor < len(users) {
+					m.targetUser = users[m.selectedUserCursor]
+					m.state = stateUserDetail
+					m.detailCursor = 0
+					m.statusMsg = ""
+				}
+			case stateUserDetail:
+				switch m.detailCursor {
+				case 0: // Change Password
+					m.state = stateUserChangePassword
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewInput().
+								Title("New Password").
+								Password(true).
+								Key("newPassword").
+								Validate(func(str string) error {
+									if len(str) < 4 {
+										return fmt.Errorf("password must be at least 4 characters")
+									}
+									return nil
+								}),
+						),
+					)
+					return m, m.form.Init()
+				case 1: // Rename User
+					m.state = stateUserRename
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewInput().
+								Title("New Username").
+								Key("newUsername").
+								Validate(func(str string) error {
+									if strings.TrimSpace(str) == "" {
+										return fmt.Errorf("username cannot be empty")
+									}
+									return nil
+								}),
+						),
+					)
+					return m, m.form.Init()
+				case 2: // Toggle Status
+					err := db.SetDisabled(m.targetUser.Username, !m.targetUser.IsDisabled)
+					if err != nil {
+						m.statusMsg = fmt.Sprintf("Error toggling status: %v", err)
+					} else {
+						m.targetUser.IsDisabled = !m.targetUser.IsDisabled
+						if m.targetUser.IsDisabled {
+							m.statusMsg = fmt.Sprintf("User '%s' is now disabled", m.targetUser.Username)
+						} else {
+							m.statusMsg = fmt.Sprintf("User '%s' is now enabled", m.targetUser.Username)
+						}
+					}
+				case 3: // Delete User
+					m.state = stateUserDelete
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("Are you sure you want to delete '%s'?", m.targetUser.Username)).
+								Key("confirmDelete"),
+						),
+					)
+					return m, m.form.Init()
+				case 4: // Back to List
+					m.state = stateUserList
+					m.statusMsg = ""
+				}
+			case stateStatus:
 				m.state = stateMenu
 			}
 		case "a":
@@ -205,7 +317,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var s strings.Builder
 
-	if m.state == stateUserCreate || m.state == stateUserDelete || m.state == stateConfig {
+	if m.state == stateUserCreate || m.state == stateUserDelete || m.state == stateConfig || m.state == stateUserChangePassword || m.state == stateUserRename {
 		return titleStyle.Render("NEXUS RESEARCH STATION - TUI PANEL") + "\n\n" + m.form.View()
 	}
 
@@ -246,19 +358,30 @@ func (m Model) View() string {
 			t := table.New().
 				Border(lipgloss.RoundedBorder()).
 				BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#30363D"))).
-				Headers("USERNAME", "ROLE", "CREATED AT")
+				Headers("USERNAME", "ROLE", "STATUS", "CREATED AT")
 
 			for _, u := range users {
 				role := "User"
 				if u.IsAdmin {
 					role = "Admin"
 				}
-				t.Row(u.Username, role, u.CreatedAt.Format("2006-01-02 15:04"))
+				statusText := "Active"
+				if u.IsDisabled {
+					statusText = "Disabled"
+				}
+				t.Row(u.Username, role, statusText, u.CreatedAt.Format("2006-01-02 15:04"))
 			}
 
 			t.StyleFunc(func(row, col int) lipgloss.Style {
 				if row == 0 {
 					return lipgloss.NewStyle().Foreground(lipgloss.Color("#00b52d")).Bold(true)
+				}
+				// Highlight selected user row
+				if row-1 == m.selectedUserCursor {
+					return lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#00b52d")).
+						Bold(true).
+						Background(lipgloss.Color("#161B22"))
 				}
 				return lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
 			})
@@ -270,7 +393,53 @@ func (m Model) View() string {
 		if m.statusMsg != "" {
 			s.WriteString(selectedStyle.Render(m.statusMsg) + "\n\n")
 		}
-		s.WriteString("[a: add user, d: delete user, esc/q: back]\n")
+		s.WriteString("[up/down: navigate, enter: select, a: add user, d: delete, esc/q: back]\n")
+
+	case stateUserDetail:
+		s.WriteString(fmt.Sprintf("User Profile: %s\n\n", m.targetUser.Username))
+
+		statusText := "Active"
+		if m.targetUser.IsDisabled {
+			statusText = "Disabled"
+		}
+		roleText := "User"
+		if m.targetUser.IsAdmin {
+			roleText = "Admin"
+		}
+
+		profileBlock := fmt.Sprintf(
+			"Username   : %s\nRole       : %s\nStatus     : %s\nRegistered : %s",
+			m.targetUser.Username, roleText, statusText, m.targetUser.CreatedAt.Format("2006-01-02 15:04"),
+		)
+		s.WriteString(borderStyle.Render(profileBlock))
+		s.WriteString("\n\nSelect action:\n\n")
+
+		toggleText := "Disable User Account"
+		if m.targetUser.IsDisabled {
+			toggleText = "Enable User Account"
+		}
+
+		actions := []string{
+			"Change Password",
+			"Rename User",
+			toggleText,
+			"Delete User Account",
+			"Back to User List",
+		}
+
+		for i, act := range actions {
+			if i == m.detailCursor {
+				s.WriteString(selectedStyle.Render(fmt.Sprintf("> %s", act)))
+			} else {
+				s.WriteString(normalStyle.Render(fmt.Sprintf("  %s", act)))
+			}
+			s.WriteString("\n")
+		}
+		s.WriteString("\n")
+		if m.statusMsg != "" {
+			s.WriteString(selectedStyle.Render(m.statusMsg) + "\n\n")
+		}
+		s.WriteString("[up/down: navigate, enter: select, esc/q: back]\n")
 
 	case stateStatus:
 		s.WriteString("System Metrics:\n\n")
@@ -279,7 +448,7 @@ func (m Model) View() string {
 		if err == nil {
 			userCount = len(users)
 		}
-		
+
 		// DB file size
 		var dbSizeStr string = "0 bytes"
 		fileInfo, err := os.Stat(m.dbPath)
@@ -314,20 +483,57 @@ func (m *Model) handleFormCompletion() {
 			m.statusMsg = fmt.Sprintf("User '%s' successfully created", username)
 		}
 		m.state = stateUserList
-	case stateUserDelete:
-		targetUser := m.form.GetString("targetUser")
-		if targetUser == "CANCEL" || targetUser == "" {
-			m.statusMsg = "User deletion cancelled"
-			m.state = stateUserList
-			return
-		}
-		err := db.DeleteUser(targetUser)
+	case stateUserChangePassword:
+		newPassword := m.form.GetString("newPassword")
+		err := db.ChangePassword(m.targetUser.Username, newPassword)
 		if err != nil {
-			m.statusMsg = fmt.Sprintf("Error deleting user: %v", err)
+			m.statusMsg = fmt.Sprintf("Error changing password: %v", err)
 		} else {
-			m.statusMsg = fmt.Sprintf("User '%s' successfully deleted", targetUser)
+			m.statusMsg = fmt.Sprintf("Password for '%s' updated successfully", m.targetUser.Username)
 		}
-		m.state = stateUserList
+		m.state = stateUserDetail
+	case stateUserRename:
+		newUsername := m.form.GetString("newUsername")
+		err := db.RenameUser(m.targetUser.Username, newUsername)
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Error renaming user: %v", err)
+		} else {
+			m.statusMsg = fmt.Sprintf("User renamed from '%s' to '%s'", m.targetUser.Username, newUsername)
+			m.targetUser.Username = newUsername
+		}
+		m.state = stateUserDetail
+	case stateUserDelete:
+		confirmDelete := m.form.Get("confirmDelete")
+		if confirmDelete != nil {
+			if m.form.GetBool("confirmDelete") {
+				err := db.DeleteUser(m.targetUser.Username)
+				if err != nil {
+					m.statusMsg = fmt.Sprintf("Error deleting user: %v", err)
+					m.state = stateUserDetail
+				} else {
+					m.statusMsg = fmt.Sprintf("User '%s' successfully deleted", m.targetUser.Username)
+					m.state = stateUserList
+					m.selectedUserCursor = 0
+				}
+			} else {
+				m.statusMsg = "User deletion cancelled"
+				m.state = stateUserDetail
+			}
+		} else {
+			targetUser := m.form.GetString("targetUser")
+			if targetUser == "CANCEL" || targetUser == "" {
+				m.statusMsg = "User deletion cancelled"
+				m.state = stateUserList
+				return
+			}
+			err := db.DeleteUser(targetUser)
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Error deleting user: %v", err)
+			} else {
+				m.statusMsg = fmt.Sprintf("User '%s' successfully deleted", targetUser)
+			}
+			m.state = stateUserList
+		}
 	case stateConfig:
 		newPath := m.form.GetString("newPath")
 		err := db.CloseDB()
@@ -348,7 +554,13 @@ func (m *Model) handleFormCompletion() {
 func (m *Model) handleFormAbortion() {
 	switch m.state {
 	case stateUserCreate, stateUserDelete:
-		m.state = stateUserList
+		if m.targetUser.Username != "" {
+			m.state = stateUserDetail
+		} else {
+			m.state = stateUserList
+		}
+	case stateUserChangePassword, stateUserRename:
+		m.state = stateUserDetail
 	case stateConfig:
 		m.state = stateMenu
 	}

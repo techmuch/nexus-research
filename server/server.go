@@ -120,7 +120,19 @@ func (s *Server) isAuthorized(r *http.Request) (string, bool) {
 	username, ok := s.sessions[cookie.Value]
 	s.sessionsMu.RUnlock()
 
-	return username, ok
+	if !ok {
+		return "", false
+	}
+
+	if db.DB != nil {
+		var isDisabled bool
+		err := db.DB.QueryRow("SELECT is_disabled FROM users WHERE username = ?", username).Scan(&isDisabled)
+		if err != nil || isDisabled {
+			return "", false
+		}
+	}
+
+	return username, true
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

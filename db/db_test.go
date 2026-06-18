@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -191,6 +192,256 @@ func TestDBClosedErrors(t *testing.T) {
 		t.Errorf("expected error when DB is closed")
 	}
 
+	err = ChangePassword("user", "newpassword")
+	if err == nil {
+		t.Errorf("expected error when DB is closed")
+	}
+
+	err = RenameUser("user", "newname")
+	if err == nil {
+		t.Errorf("expected error when DB is closed")
+	}
+
+	err = SetDisabled("user", true)
+	if err == nil {
+		t.Errorf("expected error when DB is closed")
+	}
+
 	// Reinitialize
 	_ = InitDB(":memory:")
 }
+
+func TestChangePassword(t *testing.T) {
+	err := InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer CloseDB()
+
+	// 1. Create a user
+	err = CreateUser("pwduser", "oldpassword", false)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	// 2. Try with empty username/password
+	err = ChangePassword("", "newpwd")
+	if err == nil {
+		t.Errorf("expected error with empty username")
+	}
+	err = ChangePassword("pwduser", "")
+	if err == nil {
+		t.Errorf("expected error with empty password")
+	}
+
+	// 3. Try with short password
+	err = ChangePassword("pwduser", "123")
+	if err == nil {
+		t.Errorf("expected error with short password")
+	}
+
+	// 4. Change password successfully
+	err = ChangePassword("pwduser", "newpassword")
+	if err != nil {
+		t.Errorf("failed to change password: %v", err)
+	}
+
+	// 5. Authenticate with old password (should fail)
+	ok, err := AuthenticateUser("pwduser", "oldpassword")
+	if err != nil {
+		t.Errorf("error authenticating: %v", err)
+	}
+	if ok {
+		t.Errorf("expected old password to be invalid")
+	}
+
+	// 6. Authenticate with new password (should succeed)
+	ok, err = AuthenticateUser("pwduser", "newpassword")
+	if err != nil {
+		t.Errorf("error authenticating: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected new password to be valid")
+	}
+}
+
+func TestRenameUser(t *testing.T) {
+	err := InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer CloseDB()
+
+	// 1. Create two users
+	err = CreateUser("user1", "password", false)
+	if err != nil {
+		t.Fatalf("failed to create user1: %v", err)
+	}
+	err = CreateUser("user2", "password", false)
+	if err != nil {
+		t.Fatalf("failed to create user2: %v", err)
+	}
+
+	// 2. Empty inputs
+	err = RenameUser("", "newname")
+	if err == nil {
+		t.Errorf("expected error with empty oldUsername")
+	}
+	err = RenameUser("user1", "")
+	if err == nil {
+		t.Errorf("expected error with empty newUsername")
+	}
+
+	// 3. Rename to existing name (should fail)
+	err = RenameUser("user1", "user2")
+	if !errors.Is(err, ErrUserAlreadyExists) {
+		t.Errorf("expected ErrUserAlreadyExists, got %v", err)
+	}
+
+	// 4. Rename successfully
+	err = RenameUser("user1", "user1_new")
+	if err != nil {
+		t.Errorf("failed to rename user: %v", err)
+	}
+
+	// 5. Verify lookup of old name fails, new name succeeds
+	ok, err := AuthenticateUser("user1", "password")
+	if err != nil {
+		t.Errorf("error authenticating: %v", err)
+	}
+	if ok {
+		t.Errorf("expected old username to be unauthenticatable")
+	}
+
+	ok, err = AuthenticateUser("user1_new", "password")
+	if err != nil {
+		t.Errorf("error authenticating: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected new username to authenticate successfully")
+	}
+}
+
+func TestSetDisabledAndAuthentication(t *testing.T) {
+	err := InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer CloseDB()
+
+	// 1. Create user
+	err = CreateUser("lockuser", "password", false)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	// 2. Try empty username
+	err = SetDisabled("", true)
+	if err == nil {
+		t.Errorf("expected error with empty username")
+	}
+
+	// 3. Check status is initially active
+	users, err := ListUsers()
+	if err != nil {
+		t.Fatalf("failed to list users: %v", err)
+	}
+	found := false
+	for _, u := range users {
+		if u.Username == "lockuser" {
+			found = true
+			if u.IsDisabled {
+				t.Errorf("expected user to be active initially")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("user not found in list")
+	}
+
+	// 4. Disable user
+	err = SetDisabled("lockuser", true)
+	if err != nil {
+		t.Errorf("failed to disable user: %v", err)
+	}
+
+	// 5. Check status in list
+	users, err = ListUsers()
+	if err != nil {
+		t.Fatalf("failed to list users: %v", err)
+	}
+	for _, u := range users {
+		if u.Username == "lockuser" {
+			if !u.IsDisabled {
+				t.Errorf("expected user to be disabled")
+			}
+		}
+	}
+
+	// 6. Try authenticating disabled user (should fail)
+	ok, err := AuthenticateUser("lockuser", "password")
+	if err != nil {
+		t.Errorf("error authenticating: %v", err)
+	}
+	if ok {
+		t.Errorf("expected disabled user authentication to fail")
+	}
+
+	// 7. Enable user
+	err = SetDisabled("lockuser", false)
+	if err != nil {
+		t.Errorf("failed to enable user: %v", err)
+	}
+
+	// 8. Try authenticating enabled user (should succeed)
+	ok, err = AuthenticateUser("lockuser", "password")
+	if err != nil {
+		t.Errorf("error authenticating: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected enabled user authentication to succeed")
+	}
+}
+
+func TestMigrations(t *testing.T) {
+	tempFile, err := os.CreateTemp("", "test_nexus_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tempPath := tempFile.Name()
+	tempFile.Close()
+	defer os.Remove(tempPath)
+
+	// InitDB first time (creates schema and table)
+	err = InitDB(tempPath)
+	if err != nil {
+		t.Fatalf("failed to init DB first time: %v", err)
+	}
+	
+	err = CreateUser("migrateduser", "password", true)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	
+	err = CloseDB()
+	if err != nil {
+		t.Fatalf("failed to close DB: %v", err)
+	}
+
+	// InitDB second time (runs migration ALTER TABLE commands on already existing columns)
+	err = InitDB(tempPath)
+	if err != nil {
+		t.Fatalf("failed to init DB second time: %v", err)
+	}
+	defer CloseDB()
+
+	// Verify user still exists and can authenticate
+	ok, err := AuthenticateUser("migrateduser", "password")
+	if err != nil {
+		t.Errorf("failed to authenticate: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected authenticated to succeed after migrating")
+	}
+}
+

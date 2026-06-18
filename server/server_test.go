@@ -287,4 +287,24 @@ func TestAuthEndpoints(t *testing.T) {
 	if rrBadJSON.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request, got %d", rrBadJSON.Code)
 	}
+
+	// 7. Test disabling user locks out active session immediately
+	err = db.SetDisabled("admin", true)
+	if err != nil {
+		t.Fatalf("failed to disable user: %v", err)
+	}
+	defer func() {
+		_ = db.SetDisabled("admin", false)
+	}()
+
+	reqCheckAuthDisabled := httptest.NewRequest("GET", "/api/auth/check", nil)
+	reqCheckAuthDisabled.AddCookie(sessionCookie)
+	rrCheckAuthDisabled := httptest.NewRecorder()
+	router.ServeHTTP(rrCheckAuthDisabled, reqCheckAuthDisabled)
+	
+	var respCheckAuthDisabled AuthCheckResponse
+	json.NewDecoder(rrCheckAuthDisabled.Body).Decode(&respCheckAuthDisabled)
+	if respCheckAuthDisabled.Authenticated {
+		t.Errorf("expected disabled user's active session to be locked out / unauthorized")
+	}
 }
