@@ -11,9 +11,10 @@ import (
 )
 
 type Server struct {
-	frontendFS embed.FS
-	port       string
-	startTime  time.Time
+	frontendFS  embed.FS
+	port        string
+	startTime   time.Time
+	frontendDir string
 }
 
 type StatusResponse struct {
@@ -25,23 +26,24 @@ type StatusResponse struct {
 
 func NewServer(frontendFS embed.FS, port string) *Server {
 	return &Server{
-		frontendFS: frontendFS,
-		port:       port,
-		startTime:  time.Now(),
+		frontendFS:  frontendFS,
+		port:        port,
+		startTime:   time.Now(),
+		frontendDir: "frontend/dist",
 	}
 }
 
-func (s *Server) Start() error {
+func (s *Server) setupRouter() (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
 	// 1. API routes
 	mux.HandleFunc("/api/status", s.handleStatus)
 
 	// 2. Static and SPA routing
-	// Extract the subdirectory "frontend/dist" from the embedded FS
-	publicFS, err := fs.Sub(s.frontendFS, "frontend/dist")
+	// Extract the subdirectory from the embedded FS
+	publicFS, err := fs.Sub(s.frontendFS, s.frontendDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	fileServer := http.FileServer(http.FS(publicFS))
@@ -77,6 +79,14 @@ func (s *Server) Start() error {
 		fileServer.ServeHTTP(w, r)
 	})
 
+	return mux, nil
+}
+
+func (s *Server) Start() error {
+	mux, err := s.setupRouter()
+	if err != nil {
+		return err
+	}
 	log.Printf("Starting NEXUS research server on http://localhost:%s\n", s.port)
 	return http.ListenAndServe(":"+s.port, mux)
 }

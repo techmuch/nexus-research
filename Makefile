@@ -1,4 +1,4 @@
-.PHONY: all build-frontend build-backend build clean run
+.PHONY: all build-frontend build-backend build clean run test-backend test-frontend-e2e test-all
 
 all: build
 
@@ -16,6 +16,17 @@ build: build-frontend build-backend
 run: build-frontend
 	@echo "Running backend server..."
 	go run main.go serve
+
+test-backend:
+	@echo "Running Go backend unit tests with coverage..."
+	go test -coverprofile=coverage.out ./cmd/... ./server/...
+	@go tool cover -func=coverage.out | grep total
+
+test-frontend-e2e:
+	@echo "Running Playwright E2E tests..."
+	cd frontend && npm run test:e2e
+
+test-all: test-backend test-frontend-e2e
 
 clean:
 	@echo "Cleaning build artifacts..."

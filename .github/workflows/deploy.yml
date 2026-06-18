@@ -1,0 +1,54 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout nexus-research
+        uses: actions/checkout@v4
+        with:
+          path: nexus-research
+
+      - name: Checkout nexus-shell
+        uses: actions/checkout@v4
+        with:
+          repository: techmuch/nexus-shell
+          path: nexus-shell
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: |
+            nexus-shell/package-lock.json
+            nexus-research/frontend/package-lock.json
+
+      # 1. Build local dependency: nexus-shell
+      - name: Install & Build nexus-shell
+        run: |
+          cd nexus-shell
+          npm ci
+          npm run build
+
+      # 2. Build application: nexus-research/frontend
+      - name: Install & Build nexus-research frontend
+        run: |
+          cd nexus-research/frontend
+          npm ci
+          npm run build
+
+      # 3. Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: nexus-research/frontend/dist
+          branch: gh-pages

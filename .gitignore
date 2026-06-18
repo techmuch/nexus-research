@@ -7,6 +7,8 @@ nexus-research
 /frontend/dist/
 /frontend/.eslintcache
 /frontend/package-lock.json
+/frontend/test-results/
+/frontend/playwright-report/
 
 # Local Environment Variables
 .env
@@ -15,3 +17,4 @@ nexus-research
 # OS Metadata
 .DS_Store
 *.log
+coverage.out
