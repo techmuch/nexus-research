@@ -1,0 +1,17 @@
+# Go Build Artifacts
+/bin/
+nexus-research
+
+# Frontend Node Modules & Build Artifacts
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.eslintcache
+/frontend/package-lock.json
+
+# Local Environment Variables
+.env
+.env.local
+
+# OS Metadata
+.DS_Store
+*.log
