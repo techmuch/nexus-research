@@ -49,52 +49,32 @@ test.describe('NEXUS Research Station Login & Auth E2E Tests', () => {
     await page.click('button:has-text("ESTABLISH LINK")');
 
     // Verify we bypass the login screen and show the workbench header
-    await expect(page.locator('.font-bold.text-lg.text-primary:has-text("NEXUS RESEARCH STATION - TERMINAL ADMIN")')).toBeVisible();
+    await expect(page.locator('h1:has-text("Nexus Dialogue Mapper")')).toBeVisible();
   });
 });
 
-test.describe('NEXUS Research Station Workbench E2E Tests', () => {
+test.describe('NEXUS Research Station Dialogue Mapper E2E Tests', () => {
   test.beforeEach(async ({ page }) => {
     // Mock check auth to return authenticated immediately
     await page.route('**/api/auth/check', async (route) => {
       await route.fulfill({ json: { authenticated: true, username: 'admin' } });
     });
 
-    // Mock status endpoint to return a mock payload
-    await page.route('**/api/status', async (route) => {
-      await route.fulfill({ 
-        json: { status: 'ok', uptime: '1m', version: '0.1.0', db_connected: true } 
-      });
-    });
-
     await page.goto('/');
   });
 
   test('should load the workspace with correct title and header', async ({ page }) => {
-    await expect(page.locator('.font-bold.text-lg.text-primary:has-text("NEXUS RESEARCH STATION - TERMINAL ADMIN")')).toBeVisible();
+    await expect(page.locator('h1:has-text("Nexus Dialogue Mapper")')).toBeVisible();
   });
 
-  test('should display the Dashboard and default active panels', async ({ page }) => {
-    // Click on the Dashboard tab button to make it active (since Documentation opens last)
-    await page.locator('.flexlayout__tab_button').filter({ hasText: 'Dashboard' }).first().click();
-
-    // Verify that the Dashboard components are loaded
-    await expect(page.locator('text=NEXUS Research Station').first()).toBeVisible();
-    await expect(page.locator('text=Autonomous Multi-Agent Orchestration').first()).toBeVisible();
-    await expect(page.locator('text=Go API Connection')).toBeVisible();
-  });
-
-  test('should render and navigate embedded documentation', async ({ page }) => {
-    // Verify that the Documentation tab is present and contains content
-    await expect(page.locator('text=Getting Started with NEXUS Research Station')).toBeVisible();
-
-    // Find and click on the "Technical Architecture" navigation button in the documentation sidebar
-    const archButton = page.locator('button:has-text("Technical Architecture")');
-    await expect(archButton).toBeVisible();
-    await archButton.click();
-
-    // Verify that the documentation content shifts to Technical Architecture
-    await expect(page.locator('h1').filter({ hasText: 'Technical Architecture' })).toBeVisible();
-    await expect(page.locator('text=Registry-Driven Frontend')).toBeVisible();
+  test('should display the dialogue mapper panels (library, canvas, inspector)', async ({ page }) => {
+    // Verify Node Library is loaded
+    await expect(page.locator('text=IBIS NODE LIBRARY')).toBeVisible();
+    
+    // Verify React Flow canvas is loaded
+    await expect(page.locator('.react-flow')).toBeVisible();
+    
+    // Verify Argument Inspector is loaded
+    await expect(page.locator('text=Argument Inspector')).toBeVisible();
   });
 });

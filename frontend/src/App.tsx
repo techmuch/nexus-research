@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { 
-  ShellLayout, 
+  DialogueMappingShell, 
   initializeShell, 
   commandRegistry, 
   menuRegistry, 
@@ -341,7 +341,6 @@ function LoginScreen({ onLoginSuccess }: { onLoginSuccess: (username: string) =>
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-  const [user, setUser] = useState<string>('');
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -351,7 +350,6 @@ function App() {
         const data: AuthCheckResponse = await res.json();
         if (data.authenticated) {
           setIsAuthenticated(true);
-          setUser(data.username || 'user');
         }
       } catch (err) {
         console.error('Failed to verify session:', err);
@@ -362,9 +360,8 @@ function App() {
     checkAuth();
   }, []);
 
-  const handleLoginSuccess = (username: string) => {
+  const handleLoginSuccess = (_username: string) => {
     setIsAuthenticated(true);
-    setUser(username);
   };
 
   useEffect(() => {
@@ -433,13 +430,11 @@ function App() {
     return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
   }
 
-  return (
-    <div style={{ width: '100vw', height: '100vh' }}>
-      <ShellLayout 
-        title={<div className="font-bold text-lg text-primary">NEXUS RESEARCH STATION - TERMINAL {user.toUpperCase()}</div>} 
-      />
-    </div>
-  );
+	return (
+		<div style={{ width: '100vw', height: '100vh' }}>
+			<DialogueMappingShell />
+		</div>
+	);
 }
 
 export default App;
