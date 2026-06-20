@@ -31,6 +31,15 @@ test.describe('NEXUS Research Station Login & Auth E2E Tests', () => {
   });
 
   test('should log in successfully and render the workspace', async ({ page }) => {
+    page.on('console', msg => {
+      if (msg.type() === 'error') {
+        console.error(`[PAGE CONSOLE ERROR]: ${msg.text()}`);
+      }
+    });
+    page.on('pageerror', err => {
+      console.error(`[PAGE UNHANDLED EXCEPTION]: ${err.message}`);
+    });
+
     // Mock check auth to return not authenticated initially
     await page.route('**/api/auth/check', async (route) => {
       await route.fulfill({ json: { authenticated: false } });
@@ -55,6 +64,15 @@ test.describe('NEXUS Research Station Login & Auth E2E Tests', () => {
 
 test.describe('NEXUS Research Station Dialogue Mapper E2E Tests', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('console', msg => {
+      if (msg.type() === 'error') {
+        console.error(`[PAGE CONSOLE ERROR]: ${msg.text()}`);
+      }
+    });
+    page.on('pageerror', err => {
+      console.error(`[PAGE UNHANDLED EXCEPTION]: ${err.message}`);
+    });
+
     // Mock check auth to return authenticated immediately
     await page.route('**/api/auth/check', async (route) => {
       await route.fulfill({ json: { authenticated: true, username: 'admin' } });
