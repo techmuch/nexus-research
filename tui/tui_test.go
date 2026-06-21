@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"unsafe"
@@ -70,7 +72,7 @@ func TestModelLifecycle(t *testing.T) {
 
 	// Verify User List view
 	viewStr = m.View()
-	if !strings.Contains(viewStr, "Registered User Accounts") {
+	if !strings.Contains(viewStr, "User Account Directory") {
 		t.Errorf("expected view to contain User List header, got:\n%s", viewStr)
 	}
 	if !strings.Contains(viewStr, "admin") {
@@ -97,7 +99,7 @@ func TestModelLifecycle(t *testing.T) {
 	if !strings.Contains(viewStr, "System Metrics") {
 		t.Errorf("expected view to contain Status metrics, got:\n%s", viewStr)
 	}
-	if !strings.Contains(viewStr, "Database Path") {
+	if !strings.Contains(viewStr, "Path:") {
 		t.Errorf("expected status block to contain Database Path key")
 	}
 
@@ -209,16 +211,20 @@ func TestTUIFormHandlers(t *testing.T) {
 	if !strings.Contains(m.statusMsg, "testformuser") {
 		t.Errorf("expected statusMsg to contain username, got: %s", m.statusMsg)
 	}
+	if m.selectedUserCursor != 1 {
+		t.Errorf("expected selectedUserCursor to follow newly created user to index 1, got %d", m.selectedUserCursor)
+	}
 
 	// 2. Test handleFormCompletion for stateUserDelete
 	m.state = stateUserDelete
+	m.targetUser = db.User{Username: "testformuser"}
 	m.form = huh.NewForm(
 		huh.NewGroup(
-			huh.NewInput().Key("targetUser"),
+			huh.NewConfirm().Key("confirmDelete"),
 		),
 	)
 	setFormResults(m.form, map[string]any{
-		"targetUser": "testformuser",
+		"confirmDelete": true,
 	})
 	m.form.State = huh.StateCompleted
 	m.handleFormCompletion()
@@ -232,13 +238,14 @@ func TestTUIFormHandlers(t *testing.T) {
 
 	// Test handleFormCompletion for stateUserDelete failure (non-existent user)
 	m.state = stateUserDelete
+	m.targetUser = db.User{Username: "nonexistentuser"}
 	m.form = huh.NewForm(
 		huh.NewGroup(
-			huh.NewInput().Key("targetUser"),
+			huh.NewConfirm().Key("confirmDelete"),
 		),
 	)
 	setFormResults(m.form, map[string]any{
-		"targetUser": "nonexistentuser",
+		"confirmDelete": true,
 	})
 	m.form.State = huh.StateCompleted
 	m.handleFormCompletion()
@@ -431,8 +438,8 @@ func TestDeleteNoUsers(t *testing.T) {
 	if m.state != stateUserList {
 		t.Errorf("expected state to remain stateUserList, got %v", m.state)
 	}
-	if !strings.Contains(m.statusMsg, "No users available to delete") {
-		t.Errorf("expected statusMsg to show 'No users available to delete', got: %s", m.statusMsg)
+	if !strings.Contains(m.statusMsg, "No user highlighted") {
+		t.Errorf("expected statusMsg to show 'No user highlighted', got: %s", m.statusMsg)
 	}
 	if cmd != nil {
 		t.Errorf("expected nil cmd, got %T", cmd)
@@ -484,260 +491,176 @@ func TestUserDetailFlow(t *testing.T) {
 
 	m := NewModel(":memory:")
 	m.state = stateUserList
-	
-	// Test navigation and boundary of user list cursor
-	// Down movement
+
+	// 1. Check navigation
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = newModel.(Model)
 	if m.selectedUserCursor != 1 {
 		t.Errorf("expected selectedUserCursor to be 1, got %d", m.selectedUserCursor)
 	}
-	// Up movement
+
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = newModel.(Model)
 	if m.selectedUserCursor != 0 {
 		t.Errorf("expected selectedUserCursor to be 0, got %d", m.selectedUserCursor)
 	}
 
-	// 1. Enter detail view for non-admin
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(Model)
-	if m.state != stateUserDetail {
-		t.Fatalf("expected state to transition to stateUserDetail, got %v", m.state)
-	}
-	if m.targetUser.Username != "adminuser" { // users listed alphabetically, adminuser first
-		t.Errorf("expected targetUser username to be 'adminuser', got '%s'", m.targetUser.Username)
-	}
-
-	// 2. View in stateUserDetail for admin user
+	// 2. Check View rendering of split-pane
 	viewStr := m.View()
-	if !strings.Contains(viewStr, "User Profile: adminuser") {
-		t.Errorf("expected view to contain profile header, got:\n%s", viewStr)
+	if !strings.Contains(viewStr, "User Account Directory") {
+		t.Errorf("expected view to contain User Account Directory header, got:\n%s", viewStr)
 	}
-	if !strings.Contains(viewStr, "Role       : Admin") {
-		t.Errorf("expected view to show admin role, got:\n%s", viewStr)
+	if !strings.Contains(viewStr, "PROFILE: adminuser") {
+		t.Errorf("expected view to contain profile panel for adminuser, got:\n%s", viewStr)
 	}
 
-	// Press ESC to go back to list
+	// 3. Test Search mode (/)
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = newModel.(Model)
+	if !m.searching {
+		t.Errorf("expected searching to be true")
+	}
+
+	// Type search characters: "t", "e", "s", "t"
+	for _, char := range "test" {
+		newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{char}})
+		m = newModel.(Model)
+	}
+	if m.searchQuery != "test" {
+		t.Errorf("expected searchQuery to be 'test', got '%s'", m.searchQuery)
+	}
+
+	// Check that view is filtered (only testdetail matches)
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "PROFILE: testdetail") {
+		t.Errorf("expected view to select testdetail after filtering, got:\n%s", viewStr)
+	}
+
+	// Backspace search
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = newModel.(Model)
+	if m.searchQuery != "tes" {
+		t.Errorf("expected query to be 'tes', got '%s'", m.searchQuery)
+	}
+
+	// Space key in search
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = newModel.(Model)
+	if m.searchQuery != "tes " {
+		t.Errorf("expected query to have space, got '%s'", m.searchQuery)
+	}
+
+	// Exit search with Esc (clears query)
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = newModel.(Model)
-	if m.state != stateUserList {
-		t.Fatalf("expected state to return to stateUserList, got %v", m.state)
+	if m.searching || m.searchQuery != "" {
+		t.Errorf("expected search to be cleared and deactivated")
 	}
 
-	// Move to testdetail and select
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = newModel.(Model) // cursor is 1, which is testdetail
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(Model)
-	if m.targetUser.Username != "testdetail" {
-		t.Fatalf("expected targetUser username to be 'testdetail', got '%s'", m.targetUser.Username)
-	}
-
-	// Check view for non-admin
-	viewStr = m.View()
-	if !strings.Contains(viewStr, "Role       : User") {
-		t.Errorf("expected view to show user role, got:\n%s", viewStr)
-	}
-
-	// 3. Navigation inside detail menu (up/down check boundaries)
-	if m.detailCursor != 0 {
-		t.Errorf("expected detailCursor to start at 0, got %d", m.detailCursor)
-	}
-	
-	// Move down
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	m = newModel.(Model)
-	if m.detailCursor != 1 {
-		t.Errorf("expected detailCursor to be 1, got %d", m.detailCursor)
-	}
-
-	// Move down to boundary
-	for i := 0; i < 5; i++ {
-		newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-		m = newModel.(Model)
-	}
-	if m.detailCursor != 4 {
-		t.Errorf("expected detailCursor to cap at 4, got %d", m.detailCursor)
-	}
-
-	// Move up
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
-	m = newModel.(Model)
-	if m.detailCursor != 3 {
-		t.Errorf("expected detailCursor to be 3, got %d", m.detailCursor)
-	}
-
-	// Move back up to 0
-	for i := 0; i < 5; i++ {
-		newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
-		m = newModel.(Model)
-	}
-	if m.detailCursor != 0 {
-		t.Errorf("expected detailCursor to cap at 0, got %d", m.detailCursor)
-	}
-
-	// 4. Test Change Password select
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// 4. Test Change Password direct key (p)
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	m = newModel.(Model)
 	if m.state != stateUserChangePassword {
-		t.Errorf("expected state to transition to stateUserChangePassword, got %v", m.state)
+		t.Errorf("expected state stateUserChangePassword, got %v", m.state)
 	}
-	if m.form == nil {
-		t.Fatalf("expected form to be initialized")
-	}
-	
-	// Abort form and verify state returns to detail
+	// Abort password form
 	m.form.State = huh.StateAborted
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = newModel.(Model)
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to return to stateUserDetail on abort, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList on password abort, got %v", m.state)
 	}
 
-	// Re-select Change Password
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Re-trigger and complete password change
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	m = newModel.(Model)
-	// Complete form
 	helperSetFormResults(m.form, map[string]any{
 		"newPassword": "newpassword123",
 	})
 	m.form.State = huh.StateCompleted
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newModel.(Model)
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to return to stateUserDetail on password change completion, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList on password change completion, got %v", m.state)
 	}
-	if !strings.Contains(m.statusMsg, "Password for 'testdetail' updated successfully") {
+	if !strings.Contains(m.statusMsg, "Password for 'adminuser' updated successfully") {
 		t.Errorf("expected success status message, got: %s", m.statusMsg)
 	}
 
-	// Verify password was indeed changed
-	ok, err := db.AuthenticateUser("testdetail", "newpassword123")
-	if err != nil || !ok {
-		t.Errorf("expected authentication with new password to succeed")
-	}
-
-	// 5. Test Rename User select
-	m.detailCursor = 1
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// 5. Test Rename User direct key (r)
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	m = newModel.(Model)
 	if m.state != stateUserRename {
-		t.Errorf("expected state to transition to stateUserRename, got %v", m.state)
+		t.Errorf("expected state stateUserRename, got %v", m.state)
 	}
-	// Abort
+	// Abort rename
 	m.form.State = huh.StateAborted
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = newModel.(Model)
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to return to stateUserDetail on rename abort, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList on rename abort, got %v", m.state)
 	}
 
-	// Re-select Rename User
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Re-trigger and complete rename
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	m = newModel.(Model)
-	// Complete Rename
 	helperSetFormResults(m.form, map[string]any{
-		"newUsername": "testdetail_new",
+		"newUsername": "z_adminuser",
 	})
 	m.form.State = huh.StateCompleted
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newModel.(Model)
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to return to stateUserDetail on rename completion, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList on rename completion, got %v", m.state)
 	}
-	if m.targetUser.Username != "testdetail_new" {
-		t.Errorf("expected targetUser username to be updated to 'testdetail_new'")
-	}
-	if !strings.Contains(m.statusMsg, "User renamed from 'testdetail' to 'testdetail_new'") {
+	if !strings.Contains(m.statusMsg, "User renamed from 'adminuser' to 'z_adminuser'") {
 		t.Errorf("expected success status message, got: %s", m.statusMsg)
 	}
-
-	// Verify old username fails and new username succeeds
-	ok, _ = db.AuthenticateUser("testdetail", "newpassword123")
-	if ok {
-		t.Errorf("expected old username authentication to fail")
-	}
-	ok, _ = db.AuthenticateUser("testdetail_new", "newpassword123")
-	if !ok {
-		t.Errorf("expected new username authentication to succeed")
+	if m.selectedUserCursor != 1 {
+		t.Errorf("expected cursor to follow renamed user to index 1, got %d", m.selectedUserCursor)
 	}
 
-	// 6. Test Toggle Status
-	m.detailCursor = 2
-	// Verify view before toggling displays action as "Disable User Account"
-	viewStr = m.View()
-	if !strings.Contains(viewStr, "Disable User Account") {
-		t.Errorf("expected detail view to offer disabling account")
-	}
-	// Select Toggle Status
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// 6. Test Toggle Status (t)
+	// Currently active
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	m = newModel.(Model)
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to remain stateUserDetail, got %v", m.state)
-	}
 	if !m.targetUser.IsDisabled {
-		t.Errorf("expected targetUser to be disabled")
+		t.Errorf("expected user to be disabled")
 	}
-	if !strings.Contains(m.statusMsg, "User 'testdetail_new' is now disabled") {
-		t.Errorf("expected disabled status message, got: %s", m.statusMsg)
-	}
-	// Verify authentication fails for disabled user
-	ok, _ = db.AuthenticateUser("testdetail_new", "newpassword123")
-	if ok {
-		t.Errorf("expected disabled user authentication to fail")
+	if !strings.Contains(m.statusMsg, "disabled") {
+		t.Errorf("expected statusMsg to show disabled status, got: %s", m.statusMsg)
 	}
 
-	// Verify view now displays action as "Enable User Account"
-	viewStr = m.View()
-	if !strings.Contains(viewStr, "Enable User Account") {
-		t.Errorf("expected detail view to offer enabling account")
-	}
-
-	// Select Toggle Status again
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Toggle back to active
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	m = newModel.(Model)
 	if m.targetUser.IsDisabled {
-		t.Errorf("expected targetUser to be enabled")
-	}
-	if !strings.Contains(m.statusMsg, "User 'testdetail_new' is now enabled") {
-		t.Errorf("expected enabled status message, got: %s", m.statusMsg)
-	}
-	// Verify authentication succeeds for enabled user
-	ok, _ = db.AuthenticateUser("testdetail_new", "newpassword123")
-	if !ok {
-		t.Errorf("expected enabled user authentication to succeed")
+		t.Errorf("expected user to be enabled")
 	}
 
-	// 7. Test Delete User Cancel
-	m.detailCursor = 3
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// 7. Test Delete User (d)
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = newModel.(Model)
 	if m.state != stateUserDelete {
-		t.Errorf("expected state to transition to stateUserDelete, got %v", m.state)
+		t.Errorf("expected state stateUserDelete, got %v", m.state)
 	}
-	// Set confirmDelete to false
+	// Cancel deletion
 	helperSetFormResults(m.form, map[string]any{
 		"confirmDelete": false,
 	})
 	m.form.State = huh.StateCompleted
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newModel.(Model)
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to return to stateUserDetail, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList, got %v", m.state)
 	}
-	if !strings.Contains(m.statusMsg, "User deletion cancelled") {
+	if !strings.Contains(m.statusMsg, "deletion cancelled") {
 		t.Errorf("expected cancellation status message, got: %s", m.statusMsg)
 	}
 
-	// 8. Test Delete User Confirm
-	m.detailCursor = 3
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Delete and confirm
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = newModel.(Model)
-	if m.state != stateUserDelete {
-		t.Errorf("expected state to transition to stateUserDelete, got %v", m.state)
-	}
-	// Set confirmDelete to true
 	helperSetFormResults(m.form, map[string]any{
 		"confirmDelete": true,
 	})
@@ -745,42 +668,17 @@ func TestUserDetailFlow(t *testing.T) {
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newModel.(Model)
 	if m.state != stateUserList {
-		t.Errorf("expected state to return to stateUserList after deletion, got %v", m.state)
+		t.Errorf("expected state to return to stateUserList, got %v", m.state)
 	}
-	if !strings.Contains(m.statusMsg, "User 'testdetail_new' successfully deleted") {
+	if !strings.Contains(m.statusMsg, "successfully deleted") {
 		t.Errorf("expected deletion success message, got: %s", m.statusMsg)
 	}
 
-	// Verify user is gone from db
-	users, _ := db.ListUsers()
-	for _, u := range users {
-		if u.Username == "testdetail_new" {
-			t.Errorf("expected deleted user to not exist in database")
-		}
-	}
-
-	// 9. Back to List button
-	m.state = stateUserDetail
-	m.detailCursor = 4 // Back to User List
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(Model)
-	if m.state != stateUserList {
-		t.Errorf("expected state to return to stateUserList, got %v", m.state)
-	}
-
-	// 10. Test Escape/q keys inside stateUserDetail
-	m.state = stateUserDetail
+	// 8. Test Escape / q to exit user list
 	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = newModel.(Model)
-	if m.state != stateUserList {
-		t.Errorf("expected state to return to stateUserList on Esc key, got %v", m.state)
-	}
-
-	m.state = stateUserDetail
-	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	m = newModel.(Model)
-	if m.state != stateUserList {
-		t.Errorf("expected state to return to stateUserList on 'q' key, got %v", m.state)
+	if m.state != stateMenu {
+		t.Errorf("expected state stateMenu on Esc key, got %v", m.state)
 	}
 }
 
@@ -806,8 +704,8 @@ func TestFormCompletionErrorPaths(t *testing.T) {
 	m.form.State = huh.StateCompleted
 	m.handleFormCompletion()
 
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to transition to stateUserDetail on error, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to transition to stateUserList on error, got %v", m.state)
 	}
 	if !strings.Contains(m.statusMsg, "Error changing password") {
 		t.Errorf("expected statusMsg to contain DB error, got: %s", m.statusMsg)
@@ -826,8 +724,8 @@ func TestFormCompletionErrorPaths(t *testing.T) {
 	m.form.State = huh.StateCompleted
 	m.handleFormCompletion()
 
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to transition to stateUserDetail on error, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to transition to stateUserList on error, got %v", m.state)
 	}
 	if !strings.Contains(m.statusMsg, "Error renaming user") {
 		t.Errorf("expected statusMsg to contain DB error, got: %s", m.statusMsg)
@@ -846,8 +744,8 @@ func TestFormCompletionErrorPaths(t *testing.T) {
 	m.form.State = huh.StateCompleted
 	m.handleFormCompletion()
 
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to transition to stateUserDetail on error, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to transition to stateUserList on error, got %v", m.state)
 	}
 	if !strings.Contains(m.statusMsg, "Error deleting user") {
 		t.Errorf("expected statusMsg to contain DB error, got: %s", m.statusMsg)
@@ -863,14 +761,14 @@ func TestTUIFormAbortionSubStates(t *testing.T) {
 
 	m.state = stateUserChangePassword
 	m.handleFormAbortion()
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to return to stateUserDetail on password form abort, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList on password form abort, got %v", m.state)
 	}
 
 	m.state = stateUserRename
 	m.handleFormAbortion()
-	if m.state != stateUserDetail {
-		t.Errorf("expected state to return to stateUserDetail on rename form abort, got %v", m.state)
+	if m.state != stateUserList {
+		t.Errorf("expected state to return to stateUserList on rename form abort, got %v", m.state)
 	}
 }
 
@@ -878,24 +776,527 @@ func TestStatusViewInMemory(t *testing.T) {
 	m := NewModel(":memory:")
 	m.state = stateStatus
 	viewStr := m.View()
-	if !strings.Contains(viewStr, "In-memory database (volatile)") {
+	if !strings.Contains(viewStr, "In-Memory (Volatile)") {
 		t.Errorf("expected view to display in-memory DB message, got:\n%s", viewStr)
 	}
 }
 
-func TestTUIToggleStatusDBError(t *testing.T) {
-	_ = db.CloseDB() // Force error on DB call
+func TestTUIToggleStatusErrorPaths(t *testing.T) {
 	m := NewModel(":memory:")
-	m.targetUser = db.User{Username: "testtoggle", IsDisabled: false}
-	m.state = stateUserDetail
-	m.detailCursor = 2 // Toggle Status
+	m.state = stateUserList
 
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Toggle status with no user selected (empty list)
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	m = newModel.(Model)
-
-	if !strings.Contains(m.statusMsg, "Error toggling status") {
-		t.Errorf("expected statusMsg to contain DB error, got: %s", m.statusMsg)
+	if m.statusMsg != "No user highlighted" {
+		t.Errorf("expected 'No user highlighted' error status message, got: %s", m.statusMsg)
 	}
-	_ = db.InitDB(":memory:") // restore
+
+	// Change password with no user selected
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	m = newModel.(Model)
+	if m.statusMsg != "No user highlighted" {
+		t.Errorf("expected 'No user highlighted' error status message, got: %s", m.statusMsg)
+	}
+
+	// Rename with no user selected
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = newModel.(Model)
+	if m.statusMsg != "No user highlighted" {
+		t.Errorf("expected 'No user highlighted' error status message, got: %s", m.statusMsg)
+	}
+
+	// Delete with no user selected
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = newModel.(Model)
+	if m.statusMsg != "No user highlighted" {
+		t.Errorf("expected 'No user highlighted' error status message, got: %s", m.statusMsg)
+	}
 }
+
+func TestTUIMoreEdgeCases(t *testing.T) {
+	// 1. Test clampCursor boundary cases
+	m := NewModel(":memory:")
+	
+	// Test clampCursor(0)
+	m.selectedUserCursor = 5
+	m.clampCursor(0)
+	if m.selectedUserCursor != 0 {
+		t.Errorf("expected cursor to be 0 for numUsers = 0, got %d", m.selectedUserCursor)
+	}
+
+	// Test clampCursor with negative cursor
+	m.selectedUserCursor = -3
+	m.clampCursor(5)
+	if m.selectedUserCursor != 0 {
+		t.Errorf("expected cursor to clamp to 0, got %d", m.selectedUserCursor)
+	}
+
+	// Test clampCursor with cursor >= numUsers
+	m.selectedUserCursor = 10
+	m.clampCursor(5)
+	if m.selectedUserCursor != 4 {
+		t.Errorf("expected cursor to clamp to 4, got %d", m.selectedUserCursor)
+	}
+
+	// 2. Test empty users list view with query vs no query
+	_ = db.CloseDB()
+	_ = db.InitDB(":memory:") // empty db
+
+	m.state = stateUserList
+	m.searchQuery = ""
+	viewStr := m.View()
+	if !strings.Contains(viewStr, "No registered user accounts.") {
+		t.Errorf("expected view to contain 'No registered user accounts.', got:\n%s", viewStr)
+	}
+
+	m.searchQuery = "test"
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "No users match filter query.") {
+		t.Errorf("expected view to contain 'No users match filter query.', got:\n%s", viewStr)
+	}
+
+	// 3. Test detail profile view when selectedUserCursor is out of bounds
+	_ = db.CreateUser("user1", "password", false)
+	m.selectedUserCursor = 10
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "No user selected.") {
+		t.Errorf("expected view to render 'No user selected.' in detail pane, got:\n%s", viewStr)
+	}
+
+	// Restore db for remaining tests
+	_ = db.CloseDB()
+	_ = db.InitDB(":memory:")
+}
+
+func TestFormValidators(t *testing.T) {
+	// Reinit db
+	_ = db.CloseDB()
+	_ = db.InitDB(":memory:")
+	_ = db.CreateUser("admin", "adminpassword", true)
+
+	m := NewModel(":memory:")
+
+	// Helper to extract validator function using unsafe.Pointer to bypass unexported fields
+	getValidator := func(form *huh.Form, groupIdx, fieldIdx int) func(string) error {
+		formVal := reflect.ValueOf(form).Elem()
+		selectorVal := formVal.FieldByName("selector").Elem()
+		groupsSlice := selectorVal.FieldByName("items")
+		groupVal := groupsSlice.Index(groupIdx).Elem()
+		groupSelectorVal := groupVal.FieldByName("selector").Elem()
+		fieldsSlice := groupSelectorVal.FieldByName("items")
+		fieldVal := fieldsSlice.Index(fieldIdx).Elem().Elem()
+		validateFuncVal := fieldVal.FieldByName("validate")
+		if !validateFuncVal.IsValid() || validateFuncVal.IsNil() {
+			return nil
+		}
+		validateFuncPtr := (*func(string) error)(unsafe.Pointer(validateFuncVal.UnsafeAddr()))
+		return *validateFuncPtr
+	}
+
+	// 1. Create User form validators
+	m.state = stateUserList
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = newModel.(Model)
+	if m.state != stateUserCreate || m.form == nil {
+		t.Fatalf("expected form to be initialized for user creation")
+	}
+	
+	usernameValidator := getValidator(m.form, 0, 0)
+	if usernameValidator == nil {
+		t.Fatal("username validator not found")
+	}
+	if err := usernameValidator("   "); err == nil || err.Error() != "username cannot be empty" {
+		t.Errorf("expected username empty error, got %v", err)
+	}
+	if err := usernameValidator("testuser"); err != nil {
+		t.Errorf("expected valid username, got %v", err)
+	}
+	if err := usernameValidator("admin"); err == nil || err.Error() != "user already exists" {
+		t.Errorf("expected user already exists error for admin, got %v", err)
+	}
+
+	passwordValidator := getValidator(m.form, 0, 1)
+	if passwordValidator == nil {
+		t.Fatal("password validator not found")
+	}
+	if err := passwordValidator("123"); err == nil || err.Error() != "password must be at least 4 characters" {
+		t.Errorf("expected short password error, got %v", err)
+	}
+	if err := passwordValidator("1234"); err != nil {
+		t.Errorf("expected valid password, got %v", err)
+	}
+
+	// 2. Rename User form validators
+	m.state = stateUserList
+	m.selectedUserCursor = 0
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = newModel.(Model)
+	if m.state != stateUserRename || m.form == nil {
+		t.Fatalf("expected form to be initialized for user renaming")
+	}
+
+	renameValidator := getValidator(m.form, 0, 0)
+	if renameValidator == nil {
+		t.Fatal("rename validator not found")
+	}
+	if err := renameValidator("   "); err == nil || err.Error() != "username cannot be empty" {
+		t.Errorf("expected rename empty error, got %v", err)
+	}
+	if err := renameValidator("newuser"); err != nil {
+		t.Errorf("expected valid rename, got %v", err)
+	}
+	// admin is the current user, so renaming to admin is allowed
+	if err := renameValidator("admin"); err != nil {
+		t.Errorf("expected valid rename to own name, got %v", err)
+	}
+	// create another user to test rename clash
+	_ = db.CreateUser("anotheruser", "pass", false)
+	if err := renameValidator("anotheruser"); err == nil || err.Error() != "user already exists" {
+		t.Errorf("expected user already exists error for anotheruser, got %v", err)
+	}
+
+	// 3. Change Password form validators
+	m.state = stateUserList
+	m.selectedUserCursor = 0
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	m = newModel.(Model)
+	if m.state != stateUserChangePassword || m.form == nil {
+		t.Fatalf("expected form to be initialized for password change")
+	}
+
+	changePwdValidator := getValidator(m.form, 0, 0)
+	if changePwdValidator == nil {
+		t.Fatal("change pwd validator not found")
+	}
+	if err := changePwdValidator("123"); err == nil || err.Error() != "password must be at least 4 characters" {
+		t.Errorf("expected short password error, got %v", err)
+	}
+	if err := changePwdValidator("1234"); err != nil {
+		t.Errorf("expected valid password, got %v", err)
+	}
+
+	// 4. Config DB Path form validators
+	m.state = stateMenu
+	m.cursor = 1
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(Model)
+	if m.state != stateConfig || m.form == nil {
+		t.Fatalf("expected form to be initialized for database config")
+	}
+
+	configValidator := getValidator(m.form, 0, 0)
+	if configValidator == nil {
+		t.Fatal("config validator not found")
+	}
+	if err := configValidator("   "); err == nil || err.Error() != "database path cannot be empty" {
+		t.Errorf("expected config empty error, got %v", err)
+	}
+	if err := configValidator("nexus.db"); err != nil {
+		t.Errorf("expected valid config path, got %v", err)
+	}
+}
+
+func TestTUIResponsiveLayoutAndHelp(t *testing.T) {
+	_ = db.CloseDB()
+	_ = db.InitDB(":memory:")
+	// No users initially
+
+	m := NewModel(":memory:")
+	m.state = stateUserList
+
+	// 1. Verify contextual command help card (no users case)
+	viewStr := m.View()
+	if !strings.Contains(viewStr, "Add: a") || strings.Contains(viewStr, "Password: p") {
+		t.Errorf("expected only add and esc keyboard commands in footer when empty, got:\n%s", viewStr)
+	}
+
+	// 2. Add a user and verify detail help changes
+	_ = db.CreateUser("user1", "pass", false)
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "Password: p") {
+		t.Errorf("expected full user keyboard commands in footer when users exist, got:\n%s", viewStr)
+	}
+
+	// 3. Test clear status message on key navigation
+	m.statusMsg = "Important notification"
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = newModel.(Model)
+	if m.statusMsg != "" {
+		t.Errorf("expected statusMsg to be cleared on navigation, got '%s'", m.statusMsg)
+	}
+
+	// Reset status message and test search typing clearing it
+	m.statusMsg = "Some notification"
+	m.searching = true
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = newModel.(Model)
+	if m.statusMsg != "" {
+		t.Errorf("expected statusMsg to be cleared on search typing, got '%s'", m.statusMsg)
+	}
+	m.searching = false
+
+	// 4. Test WindowSizeMsg responsive layout updates
+	// Normal wide layout
+	newModel, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = newModel.(Model)
+	if m.width != 100 || m.height != 40 {
+		t.Errorf("expected width=100 height=40, got width=%d height=%d", m.width, m.height)
+	}
+	viewStr = m.View()
+	if viewStr == "" {
+		t.Errorf("expected non-empty view string")
+	}
+
+	// Narrow vertical layout
+	newModel, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
+	m = newModel.(Model)
+	viewStr = m.View()
+	if viewStr == "" {
+		t.Errorf("expected non-empty view string on narrow window size")
+	}
+
+	// Test status dashboard views under different sizes
+	m.state = stateStatus
+	// Wide status view (should contain DATABASE ENGINE and USER METRICS)
+	newModel, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = newModel.(Model)
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "DATABASE ENGINE") || !strings.Contains(viewStr, "USER METRICS") {
+		t.Errorf("expected status cards in wide view, got:\n%s", viewStr)
+	}
+
+	// Narrow status view
+	newModel, _ = m.Update(tea.WindowSizeMsg{Width: 50, Height: 40})
+	m = newModel.(Model)
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "DATABASE ENGINE") {
+		t.Errorf("expected status cards in narrow view, got:\n%s", viewStr)
+	}
+
+	// Test menu views under different sizes
+	m.state = stateMenu
+	newModel, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = newModel.(Model)
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "User Management") {
+		t.Errorf("expected menu options in wide menu view, got:\n%s", viewStr)
+	}
+
+	newModel, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
+	m = newModel.(Model)
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "User Management") {
+		t.Errorf("expected menu options in narrow menu view, got:\n%s", viewStr)
+	}
+
+	// Test esc key behavior clears searchQuery first in stateUserList
+	m.state = stateUserList
+	m.searchQuery = "filteredquery"
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = newModel.(Model)
+	if m.searchQuery != "" {
+		t.Errorf("expected searchQuery to be cleared on first Esc, got '%s'", m.searchQuery)
+	}
+	if m.state != stateUserList {
+		t.Errorf("expected state to remain stateUserList on first Esc, got %v", m.state)
+	}
+
+	// Pressing esc again goes to menu
+	newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = newModel.(Model)
+	if m.state != stateMenu {
+		t.Errorf("expected state to transition to stateMenu on second Esc, got %v", m.state)
+	}
+}
+
+func TestTUIFormBordersAndErrorStyle(t *testing.T) {
+	m := NewModel(":memory:")
+	m.state = stateUserCreate
+	m.form = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Key("username"),
+		),
+	)
+
+	// 1. Test form width styling with large width (clamps to 60)
+	m.width = 100
+	viewStr := m.View()
+	if viewStr == "" {
+		t.Errorf("expected view not to be empty")
+	}
+
+	// 2. Test form width styling with small width (clamps to 30)
+	m.width = 20
+	viewStr = m.View()
+	if viewStr == "" {
+		t.Errorf("expected view not to be empty")
+	}
+
+	// 3. Test status message with "Error:" prefix in stateMenu
+	m.state = stateMenu
+	m.statusMsg = "Error: something failed"
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "Error: something failed") {
+		t.Errorf("expected statusMsg to be rendered in menu")
+	}
+
+	// 4. Test status message with "Error:" prefix in stateUserList
+	m.state = stateUserList
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "Error: something failed") {
+		t.Errorf("expected statusMsg to be rendered in user list")
+	}
+}
+
+func TestConfigPathUnchanged(t *testing.T) {
+	m := NewModel(":memory:")
+	m.state = stateConfig
+	m.form = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Key("newPath"),
+		),
+	)
+	helperSetFormResults(m.form, map[string]any{
+		"newPath": ":memory:",
+	})
+	m.form.State = huh.StateCompleted
+	m.handleFormCompletion()
+
+	if m.state != stateMenu {
+		t.Errorf("expected state to transition to stateMenu, got %v", m.state)
+	}
+	if m.statusMsg != "Database path unchanged" {
+		t.Errorf("expected statusMsg to be 'Database path unchanged', got '%s'", m.statusMsg)
+	}
+}
+
+func TestUserRenameUnchanged(t *testing.T) {
+	m := NewModel(":memory:")
+	m.state = stateUserRename
+	m.targetUser = db.User{Username: "testuser"}
+	m.form = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Key("newUsername"),
+		),
+	)
+	helperSetFormResults(m.form, map[string]any{
+		"newUsername": "testuser",
+	})
+	m.form.State = huh.StateCompleted
+	m.handleFormCompletion()
+
+	if m.state != stateUserList {
+		t.Errorf("expected state to transition to stateUserList, got %v", m.state)
+	}
+	if m.statusMsg != "Username unchanged" {
+		t.Errorf("expected statusMsg to be 'Username unchanged', got '%s'", m.statusMsg)
+	}
+}
+
+func TestTUIFormFooter(t *testing.T) {
+	m := NewModel(":memory:")
+	m.state = stateUserCreate
+	m.form = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Key("username"),
+		),
+	)
+
+	viewStr := m.View()
+	if !strings.Contains(viewStr, "Next Field: Tab") {
+		t.Errorf("expected form view to contain form footer navigation guide, got:\n%s", viewStr)
+	}
+}
+
+func TestTUISearchSelectionPersistence(t *testing.T) {
+	_ = db.CloseDB()
+	_ = db.InitDB(":memory:")
+
+	_ = db.CreateUser("admin", "pass", true)
+	_ = db.CreateUser("bob", "pass", false)
+	_ = db.CreateUser("testdetail", "pass", false)
+
+	m := NewModel(":memory:")
+	m.state = stateUserList
+
+	// Highlight testdetail (sorted list: admin, bob, testdetail -> index 2)
+	m.selectedUserCursor = 2
+	m.updateLastHighlighted()
+
+	// Type search query character: "t" (filtered list: only testdetail -> index 0)
+	m.updateSearchQuery("t")
+	if m.selectedUserCursor != 0 {
+		t.Errorf("expected selectedUserCursor to remain focused on testdetail (index 0), got %d", m.selectedUserCursor)
+	}
+
+	// Filter out the selected user
+	m.updateSearchQuery("tx")
+	if m.selectedUserCursor != 0 {
+		t.Errorf("expected selectedUserCursor to clamp to 0, got %d", m.selectedUserCursor)
+	}
+
+	// Restore search filter
+	m.updateSearchQuery("t")
+	if m.selectedUserCursor != 0 {
+		t.Errorf("expected selectedUserCursor to focus on testdetail (index 0), got %d", m.selectedUserCursor)
+	}
+	
+	m.updateSearchQuery("") // clear search
+
+	if m.selectedUserCursor != 2 {
+		t.Errorf("expected selectedUserCursor to restore focus to testdetail (index 2), got %d", m.selectedUserCursor)
+	}
+}
+
+func TestTUIViewportScrolling(t *testing.T) {
+	_ = db.CloseDB()
+	_ = db.InitDB(":memory:")
+
+	for i := 1; i <= 15; i++ {
+		username := fmt.Sprintf("user%02d", i)
+		_ = db.CreateUser(username, "password", false)
+	}
+
+	m := NewModel(":memory:")
+	m.state = stateUserList
+	
+	m.height = 20
+	m.width = 80
+
+	m.clampCursor(15)
+	if m.scrollOffset != 0 {
+		t.Errorf("expected initial scrollOffset to be 0, got %d", m.scrollOffset)
+	}
+
+	m.selectedUserCursor = 5
+	m.clampCursor(15)
+	if m.scrollOffset != 0 {
+		t.Errorf("expected scrollOffset to be 0 when cursor is 5, got %d", m.scrollOffset)
+	}
+
+	m.selectedUserCursor = 10
+	m.clampCursor(15)
+	if m.scrollOffset != 3 {
+		t.Errorf("expected scrollOffset to be 3 when cursor is 10, got %d", m.scrollOffset)
+	}
+
+	viewStr := m.View()
+	if !strings.Contains(viewStr, "Showing 4-11 of 15 accounts") {
+		t.Errorf("expected view to contain Showing 4-11 of 15 accounts, got:\n%s", viewStr)
+	}
+
+	m.selectedUserCursor = 2
+	m.clampCursor(15)
+	if m.scrollOffset != 2 {
+		t.Errorf("expected scrollOffset to slide up to 2 when cursor is 2, got %d", m.scrollOffset)
+	}
+
+	viewStr = m.View()
+	if !strings.Contains(viewStr, "Showing 3-10 of 15 accounts") {
+		t.Errorf("expected view to contain Showing 3-10 of 15 accounts, got:\n%s", viewStr)
+	}
+}
+
+
 

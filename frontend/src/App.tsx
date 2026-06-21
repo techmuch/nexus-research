@@ -273,65 +273,78 @@ function LoginScreen({ onLoginSuccess }: { onLoginSuccess: (username: string) =>
   };
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center bg-[#0D1117] text-white font-sans overflow-hidden relative">
-      {/* Decorative backdrop elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-500/10 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none" />
+    <div className="h-screen w-screen flex items-center justify-center bg-gradient-to-br from-[#2D1B4E] via-[#4A2D73] to-[#1E293B] text-white font-sans overflow-hidden relative">
+      {/* Decorative backdrop elements matching the warm sunset/violet theme */}
+      <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] rounded-full bg-orange-500/20 blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[70%] h-[70%] rounded-full bg-indigo-500/30 blur-[120px] pointer-events-none" />
 
-      {/* Login Card */}
-      <div className="w-[420px] p-8 bg-[#161B22]/90 border border-gray-800 rounded-xl shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] backdrop-blur-md relative z-10 flex flex-col gap-6 transition-all duration-300 hover:border-emerald-500/30">
-        <div className="text-center">
-          <h1 className="text-2xl font-extrabold tracking-wider text-emerald-500">NEXUS RESEARCH STATION</h1>
-          <p className="text-xs text-gray-400 mt-2">Enter credentials to establish control terminal connection</p>
+      {/* Login Card - Glassmorphism */}
+      <div className="w-[420px] p-8 bg-white/5 border border-white/10 rounded-[2rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] backdrop-blur-2xl relative z-10 flex flex-col gap-6 transition-all duration-300">
+        <div className="text-center mt-2">
+          <h1 className="text-5xl font-extrabold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-white via-orange-100 to-indigo-100 drop-shadow-md">NEXUS</h1>
+          <p className="text-sm text-white/70 mt-3 font-light">Welcome back! Please sign in to continue.</p>
         </div>
 
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded p-3 text-sm text-red-400 font-medium">
+          <div className="bg-red-500/20 border border-red-500/30 rounded-xl p-3 text-sm text-red-100 font-medium text-center shadow-inner">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5 mt-2">
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold tracking-wide text-gray-300 uppercase">Username</label>
+            <label className="text-sm font-medium tracking-wide text-white/90">Email Address</label>
             <input 
               type="text" 
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. admin"
+              placeholder="user@example.com"
               disabled={loading}
-              className="px-4 py-3 bg-[#0D1117] border border-gray-800 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-gray-600"
+              className="px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-400/50 focus:border-orange-400/50 transition-all placeholder:text-white/30 shadow-inner"
             />
           </div>
 
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold tracking-wide text-gray-300 uppercase">Password</label>
+            <label className="text-sm font-medium tracking-wide text-white/90">Password</label>
             <input 
               type="password" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               disabled={loading}
-              className="px-4 py-3 bg-[#0D1117] border border-gray-800 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-gray-600"
+              className="px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-400/50 focus:border-orange-400/50 transition-all placeholder:text-white/30 shadow-inner"
             />
+            <div className="text-right">
+              <a href="#" className="text-[12px] text-indigo-300 hover:text-white transition-colors cursor-pointer">Forgot Password?</a>
+            </div>
           </div>
 
           <button 
             type="submit"
             disabled={loading}
-            className="w-full mt-2 py-3 bg-emerald-500 text-[#0D1117] font-bold tracking-wider rounded hover:bg-emerald-400 disabled:bg-emerald-600/50 disabled:text-gray-500 transition-all active:scale-[0.98]"
+            className="w-full mt-4 py-3.5 bg-gradient-to-r from-orange-500 to-purple-500 text-white font-bold tracking-wide rounded-full hover:shadow-[0_0_20px_rgba(249,115,22,0.4)] disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98] shadow-lg text-[15px]"
           >
-            {loading ? 'CONNECTING...' : 'ESTABLISH LINK'}
+            {loading ? 'SIGNING IN...' : 'SIGN IN'}
           </button>
         </form>
 
-        <div className="border-t border-gray-800/60 pt-4 text-center">
-          <p className="text-[10px] text-gray-500 leading-normal">
-            Admins must register user accounts locally using the CLI utility:
-            <code className="block mt-2 p-1.5 bg-[#0D1117] border border-gray-800/80 rounded font-mono text-gray-400 text-[9px] select-all">
-              nexus-research user create
-            </code>
+        <div className="pt-2 text-center mb-2">
+          <p className="text-[13px] text-white/70">
+            Don't have an account? <span className="text-indigo-300 hover:text-white cursor-pointer transition-colors font-medium">Sign Up</span>
           </p>
+          <div className="mt-6 flex items-center gap-3">
+            <div className="h-[1px] flex-1 bg-white/10" />
+            <span className="text-[11px] text-white/50 tracking-wide uppercase">Or continue with</span>
+            <div className="h-[1px] flex-1 bg-white/10" />
+          </div>
+          <div className="mt-5 flex justify-center gap-4">
+             <div className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center cursor-pointer transition-colors border border-white/10 shadow-sm">
+               <span className="text-[15px] font-extrabold text-transparent bg-clip-text bg-gradient-to-br from-blue-400 via-red-400 to-yellow-400">G</span>
+             </div>
+             <div className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center cursor-pointer transition-colors border border-white/10 shadow-sm">
+               <span className="text-lg text-white"></span>
+             </div>
+          </div>
         </div>
       </div>
     </div>

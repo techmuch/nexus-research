@@ -3,6 +3,7 @@ package db
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -444,4 +445,131 @@ func TestMigrations(t *testing.T) {
 		t.Errorf("expected authenticated to succeed after migrating")
 	}
 }
+
+func TestSQLQueryErrors(t *testing.T) {
+	_ = InitDB(":memory:")
+	// Close the connection directly, leaving DB pointer non-nil
+	_ = DB.Close()
+
+	// 1. CreateUser DB error (QueryRow or Exec error)
+	err := CreateUser("someuser", "password", false)
+	if err == nil {
+		t.Errorf("expected error when DB connection is closed directly, got nil")
+	}
+
+	// 2. AuthenticateUser DB error (QueryRow error)
+	_, err = AuthenticateUser("someuser", "password")
+	if err == nil {
+		t.Errorf("expected error when DB connection is closed directly, got nil")
+	}
+
+	// 3. ListUsers DB error (Query error)
+	_, err = ListUsers()
+	if err == nil {
+		t.Errorf("expected error when DB connection is closed directly, got nil")
+	}
+
+	// 4. DeleteUser DB error (Exec error)
+	err = DeleteUser("someuser")
+	if err == nil {
+		t.Errorf("expected error when DB connection is closed directly, got nil")
+	}
+
+	// 5. ChangePassword DB error (Exec error)
+	err = ChangePassword("someuser", "newpwd")
+	if err == nil {
+		t.Errorf("expected error when DB connection is closed directly, got nil")
+	}
+
+	// 6. RenameUser DB error (QueryRow or Exec error)
+	err = RenameUser("someuser", "newuser")
+	if err == nil {
+		t.Errorf("expected error when DB connection is closed directly, got nil")
+	}
+
+	// 7. SetDisabled DB error (Exec error)
+	err = SetDisabled("someuser", true)
+	if err == nil {
+		t.Errorf("expected error when DB connection is closed directly, got nil")
+	}
+
+	// Reset DB pointer
+	DB = nil
+	_ = InitDB(":memory:")
+}
+
+func TestInitDBAutoCreateDir(t *testing.T) {
+	tempParentDir := filepath.Join(os.TempDir(), "nexus_research_test_dir_autocreate")
+	// Make sure it doesn't exist first
+	_ = os.RemoveAll(tempParentDir)
+	
+	dbPath := filepath.Join(tempParentDir, "nexus.db")
+	
+	// Test InitDB auto-creates the parent directory and initializes the DB successfully
+	err := InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("expected InitDB to succeed and auto-create directory, got error: %v", err)
+	}
+	defer func() {
+		_ = CloseDB()
+		_ = os.RemoveAll(tempParentDir)
+	}()
+
+	// Verify DB is functional
+	err = DB.Ping()
+	if err != nil {
+		t.Errorf("expected DB to ping successfully, got error: %v", err)
+	}
+}
+
+func TestUsernameTrimming(t *testing.T) {
+	err := InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer CloseDB()
+
+	// 1. Create user with leading/trailing spaces
+	err = CreateUser("  spacename  ", "password123", false)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	// 2. Authenticate using trimmed name
+	ok, err := AuthenticateUser("spacename", "password123")
+	if err != nil || !ok {
+		t.Errorf("failed to authenticate trimmed username: ok=%v, err=%v", ok, err)
+	}
+
+	// 3. Authenticate using untrimmed name (which gets trimmed)
+	ok, err = AuthenticateUser("  spacename  ", "password123")
+	if err != nil || !ok {
+		t.Errorf("failed to authenticate untrimmed username: ok=%v, err=%v", ok, err)
+	}
+
+	// 4. Rename user
+	err = RenameUser("spacename", "  newname  ")
+	if err != nil {
+		t.Fatalf("failed to rename user: %v", err)
+	}
+
+	// Check that we can authenticate using "newname"
+	ok, err = AuthenticateUser("newname", "password123")
+	if err != nil || !ok {
+		t.Errorf("failed to authenticate renamed username: ok=%v, err=%v", ok, err)
+	}
+
+	// 5. Delete user
+	err = DeleteUser("  newname  ")
+	if err != nil {
+		t.Fatalf("failed to delete user: %v", err)
+	}
+
+	// Verify not found
+	ok, err = AuthenticateUser("newname", "password123")
+	if ok {
+		t.Errorf("expected user to be deleted, but authenticated successfully")
+	}
+}
+
 
