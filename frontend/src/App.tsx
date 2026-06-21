@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { 
-  DialogueMappingShell, 
+  NexusWorkspaceShell, 
   initializeShell, 
   commandRegistry, 
   menuRegistry, 
@@ -445,7 +445,7 @@ function App() {
 
 	return (
 		<div style={{ width: '100vw', height: '100vh' }}>
-			<DialogueMappingShell />
+			<NexusWorkspaceShell />
 		</div>
 	);
 }
