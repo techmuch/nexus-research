@@ -51,6 +51,8 @@ func (s *Server) setupRouter() (*http.ServeMux, error) {
 	mux.HandleFunc("/api/projects/share", s.handleShareProject)
 	mux.HandleFunc("/api/files", s.handleFiles)
 	mux.HandleFunc("/api/maps/content", s.handleMapContent)
+	mux.HandleFunc("/api/layout", s.handleLayout)
+	mux.HandleFunc("/api/profile", s.handleProfile)
 
 	// 2. Static and SPA routing
 	// Extract the subdirectory from the embedded FS
@@ -428,4 +430,94 @@ func (s *Server) handleMapContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *Server) handleLayout(w http.ResponseWriter, r *http.Request) {
+	username, ok := s.isAuthorized(r)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		layoutData, err := db.GetUserLayout(username)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if layoutData == "" {
+			w.Write([]byte("{}"))
+		} else {
+			w.Write([]byte(layoutData))
+		}
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			LayoutData interface{} `json:"layout_data"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		
+		layoutStr, _ := json.Marshal(req.LayoutData)
+		if err := db.SaveUserLayout(username, string(layoutStr)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	username, ok := s.isAuthorized(r)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == http.MethodGet {
+		profile, err := db.GetUserProfile(username)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(profile)
+		return
+	}
+
+	if r.Method == http.MethodPut {
+		var req struct {
+			FullName   string `json:"full_name"`
+			Title      string `json:"title"`
+			AvatarData string `json:"avatar_data"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := db.UpdateUserProfile(username, req.FullName, req.Title, req.AvatarData); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		profile, _ := db.GetUserProfile(username)
+		json.NewEncoder(w).Encode(profile)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }

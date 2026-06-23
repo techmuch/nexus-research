@@ -11,7 +11,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "nexus-shell": "file:../../nexus-shell",
+    "nexus-shell": "^0.1.19",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

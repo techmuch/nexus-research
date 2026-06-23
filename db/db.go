@@ -467,3 +467,77 @@ func GetFilesTree(username string) ([]FileNode, error) {
 	}
 	return files, nil
 }
+
+func SaveUserLayout(username, layoutData string) error {
+	if DB == nil {
+		return errors.New("database not initialized")
+	}
+	// Upsert layout for user
+	_, err := DB.Exec(`
+		INSERT INTO user_layouts (user_id, layout_data)
+		SELECT id, ? FROM users WHERE username = ?
+		ON CONFLICT(user_id) DO UPDATE SET layout_data = excluded.layout_data, updated_at = CURRENT_TIMESTAMP
+	`, layoutData, username)
+	return err
+}
+
+func GetUserLayout(username string) (string, error) {
+	if DB == nil {
+		return "", errors.New("database not initialized")
+	}
+	var layoutData string
+	err := DB.QueryRow(`
+		SELECT ul.layout_data 
+		FROM user_layouts ul
+		JOIN users u ON u.id = ul.user_id
+		WHERE u.username = ?
+	`, username).Scan(&layoutData)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil // No layout saved yet
+		}
+		return "", err
+	}
+	return layoutData, nil
+}
+
+type UserProfile struct {
+	Username   string `json:"username"`
+	FullName   string `json:"full_name"`
+	Title      string `json:"title"`
+	AvatarData string `json:"avatar_data"`
+}
+
+func GetUserProfile(username string) (*UserProfile, error) {
+	if DB == nil {
+		return nil, errors.New("database not initialized")
+	}
+	var p UserProfile
+	p.Username = username
+
+	var fullName, title, avatarData sql.NullString
+	err := DB.QueryRow("SELECT full_name, title, avatar_data FROM users WHERE username = ?", username).Scan(&fullName, &title, &avatarData)
+	if err != nil {
+		return nil, err
+	}
+
+	if fullName.Valid {
+		p.FullName = fullName.String
+	}
+	if title.Valid {
+		p.Title = title.String
+	}
+	if avatarData.Valid {
+		p.AvatarData = avatarData.String
+	}
+
+	return &p, nil
+}
+
+func UpdateUserProfile(username string, fullName, title, avatarData string) error {
+	if DB == nil {
+		return errors.New("database not initialized")
+	}
+	_, err := DB.Exec("UPDATE users SET full_name = ?, title = ?, avatar_data = ? WHERE username = ?", fullName, title, avatarData, username)
+	return err
+}

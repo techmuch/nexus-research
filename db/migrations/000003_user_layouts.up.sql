@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS user_layouts (
+    user_id INTEGER PRIMARY KEY,
+    layout_data TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
