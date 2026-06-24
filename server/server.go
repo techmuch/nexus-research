@@ -16,6 +16,7 @@ import (
 
 type Server struct {
 	frontendFS  embed.FS
+	host        string
 	port        string
 	startTime   time.Time
 	frontendDir string
@@ -30,9 +31,10 @@ type StatusResponse struct {
 	DBConnected bool   `json:"db_connected"`
 }
 
-func NewServer(frontendFS embed.FS, port string) *Server {
+func NewServer(frontendFS embed.FS, host string, port string) *Server {
 	return &Server{
 		frontendFS:  frontendFS,
+		host:        host,
 		port:        port,
 		startTime:   time.Now(),
 		frontendDir: "frontend/dist",
@@ -53,6 +55,7 @@ func (s *Server) setupRouter() (*http.ServeMux, error) {
 	mux.HandleFunc("/api/maps/content", s.handleMapContent)
 	mux.HandleFunc("/api/layout", s.handleLayout)
 	mux.HandleFunc("/api/profile", s.handleProfile)
+	mux.HandleFunc("/api/profile/password", s.handleProfilePassword)
 
 	// 2. Static and SPA routing
 	// Extract the subdirectory from the embedded FS
@@ -102,8 +105,13 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Starting NEXUS research server on http://localhost:%s\n", s.port)
-	return http.ListenAndServe(":"+s.port, s.auditMiddleware(mux))
+	addr := s.host + ":" + s.port
+	displayAddr := addr
+	if s.host == "" || s.host == "0.0.0.0" {
+		displayAddr = "localhost:" + s.port
+	}
+	log.Printf("Starting NEXUS research server on http://%s\n", displayAddr)
+	return http.ListenAndServe(addr, s.auditMiddleware(mux))
 }
 
 type loggingResponseWriter struct {
@@ -504,18 +512,75 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			FullName   string `json:"full_name"`
 			Title      string `json:"title"`
 			AvatarData string `json:"avatar_data"`
+			Email      string `json:"email"`
+			Theme      string `json:"theme"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := db.UpdateUserProfile(username, req.FullName, req.Title, req.AvatarData); err != nil {
+		if err := db.UpdateUserProfile(username, req.FullName, req.Title, req.AvatarData, req.Email, req.Theme); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		
 		profile, _ := db.GetUserProfile(username)
 		json.NewEncoder(w).Encode(profile)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) handleProfilePassword(w http.ResponseWriter, r *http.Request) {
+	username, ok := s.isAuthorized(r)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == http.MethodPut || r.Method == http.MethodPost {
+		var req struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+			return
+		}
+
+		if req.CurrentPassword == "" || req.NewPassword == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Current and new passwords cannot be empty"})
+			return
+		}
+
+		// Authenticate first
+		valid, err := db.AuthenticateUser(username, req.CurrentPassword)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		if !valid {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Incorrect current password"})
+			return
+		}
+
+		// Update password
+		if err := db.ChangePassword(username, req.NewPassword); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return
 	}
 

@@ -22,10 +22,37 @@ interface AuthCheckResponse {
 }
 
 function UserProfileTab() {
-  const [profile, setProfile] = useState({ full_name: '', title: '', avatar_data: '' });
+  const [profile, setProfile] = useState({ full_name: '', title: '', avatar_data: '', email: '', theme: 'system' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'preferences'>('profile');
+  
+  // Password fields
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Status/feedback messages
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | '', text: string }>({ type: '', text: '' });
+
   const userProfileStore = useUserProfileStore();
+
+  const applyTheme = (theme: string) => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+      root.classList.remove('light');
+    } else if (theme === 'light') {
+      root.classList.add('light');
+      root.classList.remove('dark');
+    } else {
+      root.classList.remove('light', 'dark');
+    }
+  };
+
+  useEffect(() => {
+    applyTheme(profile.theme);
+  }, [profile.theme]);
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL;
@@ -35,7 +62,9 @@ function UserProfileTab() {
         setProfile({
            full_name: data.full_name || '',
            title: data.title || '',
-           avatar_data: data.avatar_data || ''
+           avatar_data: data.avatar_data || '',
+           email: data.email || '',
+           theme: data.theme || 'system'
         });
         setLoading(false);
         userProfileStore.updateProfile({ 
@@ -48,20 +77,75 @@ function UserProfileTab() {
       });
   }, []);
 
-  const handleSave = async () => {
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setSaving(true);
-    const base = import.meta.env.BASE_URL;
-    await fetch(`${base}api/profile`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(profile)
-    });
-    setSaving(false);
-    userProfileStore.updateProfile({ name: profile.full_name || 'Anonymous', role: profile.title });
-    if (profile.avatar_data) {
-       userProfileStore.setCustomAvatar(profile.avatar_data);
-    } else {
-       userProfileStore.clearCustomAvatar();
+    setMessage({ type: '', text: '' });
+    try {
+      const base = import.meta.env.BASE_URL;
+      const res = await fetch(`${base}api/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: 'error', text: data.error || "Failed to save profile changes" });
+      } else {
+        setProfile({
+          full_name: data.full_name || '',
+          title: data.title || '',
+          avatar_data: data.avatar_data || '',
+          email: data.email || '',
+          theme: data.theme || 'system'
+        });
+        setMessage({ type: 'success', text: "Profile updated successfully" });
+        userProfileStore.updateProfile({ name: data.full_name || 'Anonymous', role: data.title || '' });
+        if (data.avatar_data) {
+           userProfileStore.setCustomAvatar(data.avatar_data);
+        } else {
+           userProfileStore.clearCustomAvatar();
+        }
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: "Network error occurred" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setMessage({ type: 'error', text: "New passwords do not match" });
+      return;
+    }
+    if (newPassword.length < 4) {
+      setMessage({ type: 'error', text: "Password must be at least 4 characters" });
+      return;
+    }
+    setSaving(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const base = import.meta.env.BASE_URL;
+      const res = await fetch(`${base}api/profile/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: 'error', text: data.error || "Failed to update password" });
+      } else {
+        setMessage({ type: 'success', text: "Password updated successfully" });
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: "Network error occurred" });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -79,12 +163,14 @@ function UserProfileTab() {
   if (loading) return <div className="p-8 text-white">Loading profile...</div>;
 
   return (
-    <div className="p-8 h-full overflow-y-auto bg-background text-foreground font-sans flex items-center justify-center">
-      <div className="max-w-4xl w-full bg-card border border-border rounded-xl shadow-xl flex flex-col md:flex-row overflow-hidden">
+    <div className="h-full bg-background text-foreground font-sans flex flex-col md:flex-row-reverse overflow-hidden">
+      
+      {/* Right Sidebar - Categories & Quick Profile Info */}
+      <div className="md:w-80 w-full bg-muted/20 border-b md:border-b-0 md:border-l border-border p-6 flex flex-col gap-6 overflow-y-auto shrink-0">
         
-        {/* Left Pane - Avatar Area */}
-        <div className="md:w-1/3 bg-muted/30 border-b md:border-b-0 md:border-r border-border p-8 flex flex-col items-center justify-center">
-          <div className="w-40 h-40 rounded-full overflow-hidden border-2 border-border bg-muted relative group cursor-pointer shadow-inner mb-4">
+        {/* User Card */}
+        <div className="bg-card border border-border rounded-lg p-5 flex flex-col items-center shadow-sm">
+          <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-border bg-muted relative group cursor-pointer shadow-inner mb-3">
             {profile.avatar_data ? (
               <img src={profile.avatar_data} className="w-full h-full object-cover" />
             ) : (
@@ -97,53 +183,224 @@ function UserProfileTab() {
               className="absolute inset-0 opacity-0 cursor-pointer z-10" 
             />
             <div className="absolute inset-0 bg-background/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-              <span className="text-sm font-bold text-foreground tracking-wider">UPLOAD</span>
+              <span className="text-[10px] font-bold text-foreground tracking-wider">UPLOAD</span>
             </div>
           </div>
-          <h3 className="text-lg font-bold text-card-foreground text-center line-clamp-1">{profile.full_name || 'Anonymous'}</h3>
+          <h3 className="text-base font-bold text-card-foreground text-center line-clamp-1">{profile.full_name || 'Anonymous'}</h3>
           <p className="text-xs text-muted-foreground text-center mt-1 line-clamp-1">{profile.title || 'User Profile'}</p>
         </div>
 
-        {/* Right Pane - Form Area */}
-        <div className="md:w-2/3 p-8 flex flex-col justify-center">
-          <div className="mb-8">
-            <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-1">Account Settings</h2>
-            <h1 className="text-2xl font-bold text-card-foreground">Profile Information</h1>
-          </div>
-
-          <div className="flex flex-col gap-6">
-            <div>
-              <label className="text-xs font-bold text-muted-foreground mb-2 block">Full Name</label>
-              <input 
-                type="text" 
-                value={profile.full_name} 
-                onChange={e => setProfile({...profile, full_name: e.target.value})}
-                className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-muted-foreground mb-2 block">Title / Role</label>
-              <input 
-                type="text" 
-                value={profile.title} 
-                onChange={e => setProfile({...profile, title: e.target.value})}
-                className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
-              />
-            </div>
-          </div>
-
-          <div className="mt-10 flex">
-            <button 
-              onClick={handleSave}
-              disabled={saving}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-2.5 px-6 rounded-md transition-colors shadow-sm"
-            >
-              {saving ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
+        {/* Categories Menu */}
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => { setActiveTab('profile'); setMessage({ type: '', text: '' }); }}
+            className={`w-full text-left px-4 py-2.5 rounded-md text-sm font-semibold transition-all flex items-center gap-2.5 ${
+              activeTab === 'profile'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+            }`}
+          >
+            <span>👤</span> Profile Details
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveTab('security'); setMessage({ type: '', text: '' }); }}
+            className={`w-full text-left px-4 py-2.5 rounded-md text-sm font-semibold transition-all flex items-center gap-2.5 ${
+              activeTab === 'security'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+            }`}
+          >
+            <span>🔒</span> Password & Security
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveTab('preferences'); setMessage({ type: '', text: '' }); }}
+            className={`w-full text-left px-4 py-2.5 rounded-md text-sm font-semibold transition-all flex items-center gap-2.5 ${
+              activeTab === 'preferences'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+            }`}
+          >
+            <span>⚙️</span> Preferences
+          </button>
         </div>
 
       </div>
+
+      {/* Left Pane - Form Content */}
+      <div className="flex-grow p-8 md:p-10 overflow-y-auto">
+        <div className="max-w-2xl mx-auto">
+          {message.text && (
+            <div className={`mb-6 p-4 rounded-md text-sm font-medium border flex items-center justify-between ${
+              message.type === 'success' 
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}>
+              <span>{message.text}</span>
+              <button 
+                type="button"
+                onClick={() => setMessage({ type: '', text: '' })}
+                className="text-xs opacity-60 hover:opacity-100 font-bold font-sans"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'profile' && (
+            <form onSubmit={handleSave} className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Account Settings</h2>
+                <h1 className="text-2xl font-bold text-card-foreground">Profile Information</h1>
+              </div>
+
+              <div className="flex flex-col gap-5">
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-2 block">Full Name</label>
+                  <input 
+                    type="text" 
+                    value={profile.full_name} 
+                    onChange={e => setProfile({...profile, full_name: e.target.value})}
+                    className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-2 block">Title / Role</label>
+                  <input 
+                    type="text" 
+                    value={profile.title} 
+                    onChange={e => setProfile({...profile, title: e.target.value})}
+                    className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-2 block">Email Address</label>
+                  <input 
+                    type="email" 
+                    value={profile.email} 
+                    onChange={e => setProfile({...profile, email: e.target.value})}
+                    placeholder="Enter email address"
+                    className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 flex">
+                <button 
+                  type="submit"
+                  disabled={saving}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-2.5 px-6 rounded-md transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {activeTab === 'security' && (
+            <form onSubmit={handlePasswordChange} className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Security Settings</h2>
+                <h1 className="text-2xl font-bold text-card-foreground">Update Password</h1>
+              </div>
+
+              <div className="flex flex-col gap-5">
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-2 block">Current Password</label>
+                  <input 
+                    type="password" 
+                    value={currentPassword} 
+                    onChange={e => setCurrentPassword(e.target.value)}
+                    required
+                    className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-2 block">New Password</label>
+                  <input 
+                    type="password" 
+                    value={newPassword} 
+                    onChange={e => setNewPassword(e.target.value)}
+                    required
+                    minLength={4}
+                    className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-2 block">Confirm New Password</label>
+                  <input 
+                    type="password" 
+                    value={confirmPassword} 
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    required
+                    minLength={4}
+                    className="w-full bg-input border border-border rounded-md px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 flex">
+                <button 
+                  type="submit"
+                  disabled={saving}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-2.5 px-6 rounded-md transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {saving ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {activeTab === 'preferences' && (
+            <form onSubmit={handleSave} className="flex flex-col gap-6">
+              <div>
+                <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Personalization</h2>
+                <h1 className="text-2xl font-bold text-card-foreground">Preferences</h1>
+              </div>
+
+              <div className="flex flex-col gap-5">
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-3 block">Preferred Theme</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { val: 'system', label: '🖥️ System Default' },
+                      { val: 'light', label: '☀️ Light Mode' },
+                      { val: 'dark', label: '🌙 Dark Mode' }
+                    ].map(themeOpt => (
+                      <button
+                        key={themeOpt.val}
+                        type="button"
+                        onClick={() => setProfile({ ...profile, theme: themeOpt.val })}
+                        className={`py-3 px-4 rounded-lg border text-sm font-semibold transition-all flex flex-col items-center justify-center gap-1.5 cursor-pointer ${
+                          profile.theme === themeOpt.val
+                            ? 'bg-primary/10 border-primary text-primary shadow-sm ring-1 ring-primary/50'
+                            : 'bg-card border-border hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+                        }`}
+                      >
+                        {themeOpt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex">
+                <button 
+                  type="submit"
+                  disabled={saving}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-2.5 px-6 rounded-md transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {saving ? 'Saving...' : 'Save Preferences'}
+                </button>
+              </div>
+            </form>
+          )}
+
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -577,6 +834,18 @@ function App() {
               if (profile.avatar_data) {
                 useUserProfileStore.getState().setCustomAvatar(profile.avatar_data);
               }
+              // Apply theme setting immediately
+              const theme = profile.theme || 'system';
+              const root = document.documentElement;
+              if (theme === 'dark') {
+                root.classList.add('dark');
+                root.classList.remove('light');
+              } else if (theme === 'light') {
+                root.classList.add('light');
+                root.classList.remove('dark');
+              } else {
+                root.classList.remove('light', 'dark');
+              }
             })
             .catch(console.error);
 
@@ -678,7 +947,7 @@ function App() {
 		<div style={{ width: '100vw', height: '100vh' }}>
 			<NexusWorkspaceShell 
         disableLocalStorage={true}
-        initialLayoutJson={dbLayout}
+        initialLayoutJson={dbLayout && Object.keys(dbLayout).length > 0 ? dbLayout : undefined}
         onLayoutChange={(newLayout) => {
           if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
           saveTimeoutRef.current = setTimeout(() => {

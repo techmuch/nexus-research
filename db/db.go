@@ -218,6 +218,9 @@ func ChangePassword(username, newPassword string) error {
 	}
 
 	_, err = DB.Exec("UPDATE users SET password_hash = ? WHERE username = ?", string(hashedBytes), username)
+	if err == nil {
+		_ = LogAuditAction(username, "UPDATE", "user_password", username, "Changed user password")
+	}
 	return err
 }
 
@@ -506,6 +509,8 @@ type UserProfile struct {
 	FullName   string `json:"full_name"`
 	Title      string `json:"title"`
 	AvatarData string `json:"avatar_data"`
+	Email      string `json:"email"`
+	Theme      string `json:"theme"`
 }
 
 func GetUserProfile(username string) (*UserProfile, error) {
@@ -515,8 +520,8 @@ func GetUserProfile(username string) (*UserProfile, error) {
 	var p UserProfile
 	p.Username = username
 
-	var fullName, title, avatarData sql.NullString
-	err := DB.QueryRow("SELECT full_name, title, avatar_data FROM users WHERE username = ?", username).Scan(&fullName, &title, &avatarData)
+	var fullName, title, avatarData, email, theme sql.NullString
+	err := DB.QueryRow("SELECT full_name, title, avatar_data, email, theme FROM users WHERE username = ?", username).Scan(&fullName, &title, &avatarData, &email, &theme)
 	if err != nil {
 		return nil, err
 	}
@@ -530,14 +535,23 @@ func GetUserProfile(username string) (*UserProfile, error) {
 	if avatarData.Valid {
 		p.AvatarData = avatarData.String
 	}
+	if email.Valid {
+		p.Email = email.String
+	}
+	if theme.Valid {
+		p.Theme = theme.String
+	}
 
 	return &p, nil
 }
 
-func UpdateUserProfile(username string, fullName, title, avatarData string) error {
+func UpdateUserProfile(username string, fullName, title, avatarData, email, theme string) error {
 	if DB == nil {
 		return errors.New("database not initialized")
 	}
-	_, err := DB.Exec("UPDATE users SET full_name = ?, title = ?, avatar_data = ? WHERE username = ?", fullName, title, avatarData, username)
+	_, err := DB.Exec("UPDATE users SET full_name = ?, title = ?, avatar_data = ?, email = ?, theme = ? WHERE username = ?", fullName, title, avatarData, email, theme, username)
+	if err == nil {
+		_ = LogAuditAction(username, "UPDATE", "user_profile", username, "Updated user profile info")
+	}
 	return err
 }

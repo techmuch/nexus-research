@@ -572,4 +572,49 @@ func TestUsernameTrimming(t *testing.T) {
 	}
 }
 
+func TestUserProfileExtended(t *testing.T) {
+	err := InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer CloseDB()
+
+	// 1. Create a user
+	username := "testprofileuser"
+	err = CreateUser(username, "password123", false)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	// 2. Fetch initial profile
+	profile, err := GetUserProfile(username)
+	if err != nil {
+		t.Fatalf("failed to get user profile: %v", err)
+	}
+	if profile.FullName != "" || profile.Title != "" || profile.AvatarData != "" || profile.Email != "" || profile.Theme != "" {
+		t.Errorf("expected empty initial profile, got %+v", profile)
+	}
+
+	// 3. Update profile details
+	fullName := "John Doe"
+	title := "Principal Engineer"
+	avatarData := "data:image/png;base64,xxxx"
+	email := "john.doe@example.com"
+	theme := "dark"
+	err = UpdateUserProfile(username, fullName, title, avatarData, email, theme)
+	if err != nil {
+		t.Fatalf("failed to update user profile: %v", err)
+	}
+
+	// 4. Fetch updated profile
+	profile, err = GetUserProfile(username)
+	if err != nil {
+		t.Fatalf("failed to get updated user profile: %v", err)
+	}
+	if profile.FullName != fullName || profile.Title != title || profile.AvatarData != avatarData || profile.Email != email || profile.Theme != theme {
+		t.Errorf("expected profile to match updated values, got %+v", profile)
+	}
+}
+
+
 

@@ -111,7 +111,7 @@ func TestModelLifecycle(t *testing.T) {
 	}
 
 	// 6. Test Quit Command Option
-	m.cursor = 3
+	m.cursor = 4
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Errorf("expected quit cmd to be returned on exit select")

@@ -12,7 +12,9 @@ This file outlines the workspace-specific rules, style guidelines, and behaviora
 
 ## 3. Database & State Integration
 - **Shared Test Database**: Tests run sequentially but share a global `:memory:` SQLite connection via `db.DB`. When writing integration tests, ensure data state is cleanly isolated or reset between test runs (e.g., using a `cleanupDB()` function) to prevent cascading failures.
-- **Data Persistence**: Use `sqlite` for standalone mode and ensure that every sensitive system mutation (e.g., sharing a project, modifying users) writes to the audit logs.
+- **Enterprise & Dual-Database Support**: The system must support both SQLite (for Lite standalone deployments) and PostgreSQL (for Enterprise deployments). All schemas and SQL queries must be compatible with both (e.g., avoiding database-specific syntax where possible or abstracting it).
+- **Multi-Tenant Design**: All database queries, schema designs, and backup/restore mechanisms must consider a multi-tenant architecture. Tenant isolation is a strict requirement for enterprise utilization.
+- **Data Persistence & Backups**: Ensure that every sensitive system mutation writes to the audit logs. Backups MUST be managed via native database tools (SQLite `VACUUM INTO` / backup APIs or PostgreSQL `pg_dump`/`pg_restore`) targeting a rolling `backups/` subfolder. Do NOT use external third-party tools like Kopia.
 
 ## 4. UI/UX Aesthetics
 - **Visual Formatting**: Terminal output should be responsive to terminal resize events (`tea.WindowSizeMsg`). Always wrap long text and use cohesive color palettes.

@@ -27,14 +27,14 @@ var testFrontendFS embed.FS
 var testFrontendNoIndexFS embed.FS
 
 func TestNewServer(t *testing.T) {
-	s := NewServer(testFrontendFS, "9090")
+	s := NewServer(testFrontendFS, "127.0.0.1", "9090")
 	if s.port != "9090" {
 		t.Errorf("Expected port to be 9090, got %s", s.port)
 	}
 }
 
 func TestHandleStatus(t *testing.T) {
-	s := NewServer(testFrontendFS, "9090")
+	s := NewServer(testFrontendFS, "127.0.0.1", "9090")
 
 	// 1. Test unauthorized status call
 	reqUnauth := httptest.NewRequest("GET", "/api/status", nil)
@@ -82,7 +82,7 @@ func TestHandleStatus(t *testing.T) {
 }
 
 func TestSetupRouter(t *testing.T) {
-	s := NewServer(testFrontendFS, "9090")
+	s := NewServer(testFrontendFS, "127.0.0.1", "9090")
 	router, err := s.setupRouter()
 	if err != nil {
 		t.Fatalf("failed to setup router: %v", err)
@@ -158,7 +158,7 @@ func TestSetupRouter(t *testing.T) {
 }
 
 func TestSetupRouterMissingIndex(t *testing.T) {
-	s := NewServer(testFrontendNoIndexFS, "9090")
+	s := NewServer(testFrontendNoIndexFS, "127.0.0.1", "9090")
 	router, err := s.setupRouter()
 	if err != nil {
 		t.Fatalf("failed to setup router: %v", err)
@@ -179,7 +179,7 @@ func TestSetupRouterMissingIndex(t *testing.T) {
 }
 
 func TestServerStartError(t *testing.T) {
-	s := NewServer(testFrontendFS, "-1")
+	s := NewServer(testFrontendFS, "127.0.0.1", "-1")
 	err := s.Start()
 	if err == nil {
 		t.Errorf("expected error when starting server on invalid port, got nil")
@@ -187,7 +187,7 @@ func TestServerStartError(t *testing.T) {
 }
 
 func TestSetupRouterError(t *testing.T) {
-	s := NewServer(testFrontendFS, "9090")
+	s := NewServer(testFrontendFS, "127.0.0.1", "9090")
 	s.frontendDir = "invalid/../path"
 	_, err := s.setupRouter()
 	if err == nil {
@@ -196,7 +196,7 @@ func TestSetupRouterError(t *testing.T) {
 }
 
 func TestServerStartErrorInvalidDir(t *testing.T) {
-	s := NewServer(testFrontendFS, "9090")
+	s := NewServer(testFrontendFS, "127.0.0.1", "9090")
 	s.frontendDir = "invalid/../path"
 	err := s.Start()
 	if err == nil {
@@ -205,7 +205,7 @@ func TestServerStartErrorInvalidDir(t *testing.T) {
 }
 
 func TestAuthEndpoints(t *testing.T) {
-	s := NewServer(testFrontendFS, "9090")
+	s := NewServer(testFrontendFS, "127.0.0.1", "9090")
 	router, err := s.setupRouter()
 	if err != nil {
 		t.Fatalf("failed to setup router: %v", err)
@@ -308,3 +308,116 @@ func TestAuthEndpoints(t *testing.T) {
 		t.Errorf("expected disabled user's active session to be locked out / unauthorized")
 	}
 }
+
+func TestProfileAndPasswordEndpoints(t *testing.T) {
+	err := db.InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer db.CloseDB()
+
+	s := NewServer(testFrontendFS, "127.0.0.1", "9090")
+	router, err := s.setupRouter()
+	if err != nil {
+		t.Fatalf("failed to setup router: %v", err)
+	}
+
+	username := "testserverprofileuser"
+	password := "password123"
+	err = db.CreateUser(username, password, false)
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	// 1. Authenticate to get session cookie
+	loginBody := `{"username":"` + username + `","password":"` + password + `"}`
+	reqLogin := httptest.NewRequest("POST", "/api/login", strings.NewReader(loginBody))
+	rrLogin := httptest.NewRecorder()
+	router.ServeHTTP(rrLogin, reqLogin)
+	if rrLogin.Code != http.StatusOK {
+		t.Fatalf("login failed: %d", rrLogin.Code)
+	}
+	var sessionCookie *http.Cookie
+	for _, c := range rrLogin.Result().Cookies() {
+		if c.Name == "session_token" {
+			sessionCookie = c
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatalf("session_token cookie not found")
+	}
+
+	// 2. GET /api/profile (unauthorized)
+	reqGetProfileUnauth := httptest.NewRequest("GET", "/api/profile", nil)
+	rrGetProfileUnauth := httptest.NewRecorder()
+	router.ServeHTTP(rrGetProfileUnauth, reqGetProfileUnauth)
+	if rrGetProfileUnauth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for unauthenticated profile GET, got %d", rrGetProfileUnauth.Code)
+	}
+
+	// 3. GET /api/profile (authorized)
+	reqGetProfile := httptest.NewRequest("GET", "/api/profile", nil)
+	reqGetProfile.AddCookie(sessionCookie)
+	rrGetProfile := httptest.NewRecorder()
+	router.ServeHTTP(rrGetProfile, reqGetProfile)
+	if rrGetProfile.Code != http.StatusOK {
+		t.Errorf("profile GET failed: %d", rrGetProfile.Code)
+	}
+	var profile db.UserProfile
+	json.NewDecoder(rrGetProfile.Body).Decode(&profile)
+	if profile.Username != username || profile.FullName != "" {
+		t.Errorf("unexpected profile: %+v", profile)
+	}
+
+	// 4. PUT /api/profile (authorized)
+	profilePutBody := `{"full_name":"Jane Doe","title":"Lead Designer","avatar_data":"data:img","email":"jane@example.com","theme":"light"}`
+	reqPutProfile := httptest.NewRequest("PUT", "/api/profile", strings.NewReader(profilePutBody))
+	reqPutProfile.AddCookie(sessionCookie)
+	rrPutProfile := httptest.NewRecorder()
+	router.ServeHTTP(rrPutProfile, reqPutProfile)
+	if rrPutProfile.Code != http.StatusOK {
+		t.Errorf("profile PUT failed: %d", rrPutProfile.Code)
+	}
+
+	// 5. GET /api/profile to verify values
+	reqGetProfile2 := httptest.NewRequest("GET", "/api/profile", nil)
+	reqGetProfile2.AddCookie(sessionCookie)
+	rrGetProfile2 := httptest.NewRecorder()
+	router.ServeHTTP(rrGetProfile2, reqGetProfile2)
+	var profile2 db.UserProfile
+	json.NewDecoder(rrGetProfile2.Body).Decode(&profile2)
+	if profile2.FullName != "Jane Doe" || profile2.Title != "Lead Designer" || profile2.Email != "jane@example.com" || profile2.Theme != "light" {
+		t.Errorf("profile PUT updates not persisted: %+v", profile2)
+	}
+
+	// 6. PUT /api/profile/password (invalid current password)
+	passwordPutBodyBad := `{"current_password":"wrongpassword","new_password":"newpassword123"}`
+	reqPutPasswordBad := httptest.NewRequest("PUT", "/api/profile/password", strings.NewReader(passwordPutBodyBad))
+	reqPutPasswordBad.AddCookie(sessionCookie)
+	rrPutPasswordBad := httptest.NewRecorder()
+	router.ServeHTTP(rrPutPasswordBad, reqPutPasswordBad)
+	if rrPutPasswordBad.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for incorrect password update, got %d", rrPutPasswordBad.Code)
+	}
+
+	// 7. PUT /api/profile/password (valid password change)
+	passwordPutBodyGood := `{"current_password":"` + password + `","new_password":"newpassword123"}`
+	reqPutPasswordGood := httptest.NewRequest("PUT", "/api/profile/password", strings.NewReader(passwordPutBodyGood))
+	reqPutPasswordGood.AddCookie(sessionCookie)
+	rrPutPasswordGood := httptest.NewRecorder()
+	router.ServeHTTP(rrPutPasswordGood, reqPutPasswordGood)
+	if rrPutPasswordGood.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for valid password update, got %d", rrPutPasswordGood.Code)
+	}
+
+	// 8. Authenticate again with new password
+	loginBody2 := `{"username":"` + username + `","password":"newpassword123"}`
+	reqLogin2 := httptest.NewRequest("POST", "/api/login", strings.NewReader(loginBody2))
+	rrLogin2 := httptest.NewRecorder()
+	router.ServeHTTP(rrLogin2, reqLogin2)
+	if rrLogin2.Code != http.StatusOK {
+		t.Errorf("expected login with new password to succeed, got %d", rrLogin2.Code)
+	}
+}
+
